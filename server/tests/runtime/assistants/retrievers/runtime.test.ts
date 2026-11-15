@@ -1,7 +1,7 @@
 /**
  * The retriever pipeline with a fake model and a fake search-index
  * store: exactly planner + answer model, the stream's events and
- * diagnostics shapes (contract), the cards of the results the answer model
+ * its steps as diagnostics (contract), the cards of the results the answer model
  * gets, planner failures before any answer,
  * cancellation, turns on a thread (what the models see, what the thread
  * keeps), follow-up references, and the one repeated plan for a follow-up
@@ -49,7 +49,7 @@ import {
   retrieveQuestion,
   type RunnableRetriever,
 } from "../../../../src/runtime/assistants/retrievers/runtime.js";
-import { ModelCalls, type GraphThread, type StreamExecution } from "../../../../src/assistants/index.js";
+import { Diagnostics, type GraphThread, type StreamExecution } from "../../../../src/assistants/index.js";
 import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
@@ -117,7 +117,7 @@ async function newThread(): Promise<GraphThread> {
 /** A turn's execution; its events go to `events`, its diagnostics too when asked. */
 function execution(events: Record<string, unknown>[], diagnostics: boolean, signal = new AbortController().signal): StreamExecution {
   const push = async (event: Record<string, unknown>) => { events.push(event); };
-  return { signal, onToolEvent: push, modelCalls: new ModelCalls(diagnostics ? push : undefined) };
+  return { signal, onToolEvent: push, diagnostics: new Diagnostics(diagnostics ? push : undefined) };
 }
 
 /** One question, on a new thread unless one is given. */
@@ -134,13 +134,18 @@ async function run(
   return { events, result, thread: on };
 }
 
-const diagnosticsWith = (events: Record<string, unknown>[], field: string) =>
-  events.find((e) => e.type === "diagnostics" && e[field] !== undefined)!;
+/** Every step the diagnostics listed, in the order they were sent. */
+const stepsOf = (events: Record<string, unknown>[]) =>
+  events.filter((e) => e.type === "diagnostics").flatMap((e) => e.steps as Record<string, unknown>[]);
 
-/** Every model call the diagnostics listed, in the order they were sent. */
-const modelCalls = (events: Record<string, unknown>[]) =>
-  events.filter((e) => e.type === "diagnostics" && e.modelCalls !== undefined)
-    .flatMap((e) => e.modelCalls as Record<string, unknown>[]);
+/** The plan of the turn's last planning step that carries one. */
+const planOf = (events: Record<string, unknown>[]) =>
+  stepsOf(events).filter((step) => step.plan !== undefined).at(-1)!.plan as { subQueries: Record<string, unknown>[] };
+
+/** The limitations the last answer model call was told. */
+const limitationsOf = () => JSON.parse(fake.stream.mock.calls.at(-1)![0][1].content).limitations as string[];
+
+const time = { startMs: expect.any(Number), durationMs: expect.any(Number) };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -155,7 +160,7 @@ beforeEach(() => {
 });
 
 describe("retriever pipeline", () => {
-  it("performs exactly planner + answer, streams the reply and emits the contract's diagnostics", async () => {
+  it("performs exactly planner + answer, streams the reply and sends its steps as diagnostics", async () => {
     const { events, result } = await run("Everyone in Berlin");
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.withConfig).toHaveBeenCalledWith({ response_format: PLANNER_RESPONSE_FORMAT });
@@ -165,7 +170,8 @@ describe("retriever pipeline", () => {
     expect(events.filter((e) => e.type === "retriever.phase").map((e) => `${e.phase}:${e.status}`)).toEqual([
       "plan:start", "plan:end", "retrieve:start", "retrieve:end", "answer:start", "answer:end",
     ]);
-    const plan = diagnosticsWith(events, "plan").plan as { subQueries: Record<string, unknown>[] };
+    expect(events.some((e) => "durationMs" in e && e.type !== "diagnostics")).toBe(false);
+    const plan = planOf(events);
     expect(plan.subQueries).toEqual([
       {
         indices: ["person~default"], relations: [], query: "", variants: [], mode: "keyword", previous: null,
@@ -173,35 +179,18 @@ describe("retriever pipeline", () => {
         filters: [{ id: "city", value: "Berlin", quote: "Berlin", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" }],
       },
     ]);
-    const retrieved = diagnosticsWith(events, "results");
-    expect(retrieved.results).toEqual([
-      { entityId: "ada", entityType: "person", label: "Ada", subQuery: 0, answerFields: { name: "Ada", email: "a@x" } },
+    expect(plan).toMatchObject({ unsupportedReason: null });
+    // Each step once, as soon as it ended: the two model calls and the retrieve phase.
+    expect(stepsOf(events)).toEqual([
+      { index: 1, name: "plan", model: true, ...time, usage: { input: 1, output: 2 }, plan },
+      { index: 2, name: "retrieve", ...time },
+      { index: 3, name: "answer", model: true, ...time, usage: { input: 1, output: 1 } },
     ]);
-    expect(retrieved.searchCalls).toBe(0);
-    expect(retrieved.limitations).toEqual([]);
-    const summary = events.at(-1)!;
-    expect(summary).toEqual({ type: "diagnostics", timings: expect.any(Object), searchCalls: 0 });
-    expect(Object.keys(summary.timings as object)).toEqual(
-      expect.arrayContaining(["plan", "planModel", "validation", "retrieve", "search", "context", "answer", "firstDelta", "answerModel", "total"]),
-    );
-    // Each model call once, with its texts, as soon as it ended.
-    const calls = modelCalls(events);
-    expect(calls).toEqual([
-      {
-        index: 1, name: "plan", durationMs: expect.any(Number), usage: { input: 1, output: 2 },
-        systemPrompt: PLANNER, input: fake.invoke.mock.calls[0]![0][1].content, inputTruncated: false,
-        output: planned([sub()]).content, outputTruncated: false,
-      },
-      {
-        index: 2, name: "answer", durationMs: expect.any(Number), usage: { input: 1, output: 1 },
-        systemPrompt: fake.stream.mock.calls[0]![0][0].content, input: fake.stream.mock.calls[0]![0][1].content, inputTruncated: false,
-        output: "Ada.", outputTruncated: false,
-      },
-    ]);
-    const sent = events.filter((e) => e.type === "diagnostics" && e.modelCalls !== undefined);
-    expect(events.indexOf(sent[0]!)).toBeLessThan(events.findIndex((e) => e.type === "retriever.phase" && e.phase === "plan" && e.status === "end"));
-    expect(events.indexOf(sent[1]!)).toBeGreaterThan(events.findLastIndex((e) => e.type === "delta"));
-    expect(events.some((e) => "modelIO" in e || "llmCalls" in e)).toBe(false);
+    const sent = events.filter((e) => e.type === "diagnostics");
+    const phaseEnd = (phase: string) => events.findIndex((e) => e.type === "retriever.phase" && e.phase === phase && e.status === "end");
+    expect(events.indexOf(sent[0]!)).toBeLessThan(phaseEnd("plan"));
+    expect(events.indexOf(sent[1]!)).toBeLessThan(phaseEnd("retrieve"));
+    expect(events.indexOf(sent[2]!)).toBeGreaterThan(events.findLastIndex((e) => e.type === "delta"));
   });
 
   it("a failed answer call fails the turn after the answer phase started; no retry", async () => {
@@ -214,8 +203,8 @@ describe("retriever pipeline", () => {
     fake.stream.mockRejectedValueOnce(Object.assign(new Error("Too Many Requests"), { status: 429 }));
     const events: Record<string, unknown>[] = [];
     await expect(chat(agent, "Everyone in Berlin", await newThread(), execution(events, true))).rejects.toMatchObject({ reason: "rate_limited" });
-    const failed = modelCalls(events).at(-1)!;
-    expect(failed).toMatchObject({ index: 2, name: "answer", failed: true, output: "" });
+    const failed = stepsOf(events).at(-1)!;
+    expect(failed).toEqual({ index: 3, name: "answer", model: true, ...time, failed: true });
     expect(failed).not.toHaveProperty("usage");
   });
 
@@ -240,7 +229,7 @@ describe("retriever pipeline", () => {
     const fallback: RunnableRetriever = { key: DEFAULT_RETRIEVER_KEY, config, scope: { ...agent.scope, config } };
     fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin" }] })]));
     const { events } = await run("Everyone in Berlin", true, undefined, undefined, fallback);
-    const plan = diagnosticsWith(events, "plan").plan as { subQueries: { filters: unknown[] }[] };
+    const plan = planOf(events);
     expect(plan.subQueries[0]!.filters).toEqual([
       { id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" },
     ]);
@@ -335,12 +324,12 @@ describe("retriever pipeline", () => {
     });
   });
 
-  it("shows the planner's output before a parse failure and never calls the answer model", async () => {
+  it("lists the planning call, without a plan, before a parse failure and never calls the answer model", async () => {
     fake.invoke.mockResolvedValue({ content: '{"subQueries":[', usage_metadata: { output_tokens: 1800 }, response_metadata: { finish_reason: "length" } });
     const events: Record<string, unknown>[] = [];
     await expect(chat(agent, "Who?", await newThread(), execution(events, true))).rejects.toThrow("token limit");
-    expect(modelCalls(events)).toEqual([
-      expect.objectContaining({ name: "plan", output: '{"subQueries":[', finishReason: "length", usage: { output: 1800 } }),
+    expect(stepsOf(events)).toEqual([
+      { index: 1, name: "plan", model: true, ...time, finishReason: "length", usage: { output: 1800 } },
     ]);
     expect(fake.stream).not.toHaveBeenCalled();
   });
@@ -350,12 +339,11 @@ describe("retriever pipeline", () => {
     fake.invoke.mockResolvedValue(planned([
       sub({ query: "events about artificial intelligence", filters: [{ id: "city", value: "Paris", quote: "Paris" }] }),
     ]));
-    const { events } = await run("Which events are about artificial intelligence?");
+    await run("Which events are about artificial intelligence?");
     expect(rankEntries.mock.calls[0]![0].text).toBe("events about artificial intelligence");
     // No filter applied: no restriction.
     expect(rankEntries.mock.calls[0]![0].entityIds).toBeNull();
-    const limitations = diagnosticsWith(events, "results").limitations as string[];
-    expect(limitations).toContain(
+    expect(limitationsOf()).toContain(
       'The condition "lives in City Name: Paris" was not applied: the value is not stated verbatim in a user message.',
     );
     expect(fake.stream).toHaveBeenCalledTimes(1);
@@ -367,7 +355,7 @@ describe("retriever pipeline", () => {
     const first = await run("Who is CTO at ACME?", false);
     // The planner points at the previous (searched) results.
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO at ACME since", filters: [], previous: { filterId: null, quote: "these" } })]));
-    const { events } = await run("Since when are these at ACME?", true, first.thread);
+    await run("Since when are these at ACME?", true, first.thread);
     const plannerInput = JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content);
     expect(plannerInput.history).toEqual([
       { role: "user", content: "Who is CTO at ACME?" },
@@ -377,8 +365,7 @@ describe("retriever pipeline", () => {
     const second = rankEntries.mock.calls.at(-1)![0];
     expect(second.text).toBe("CTO at ACME since");
     expect(second.entityIds).toBeNull();
-    const limitations = diagnosticsWith(events, "results").limitations as string[];
-    expect(limitations.some((text) => text.includes("reference to previous results was ignored"))).toBe(true);
+    expect(limitationsOf().some((text) => text.includes("reference to previous results was ignored"))).toBe(true);
   });
 
   describe("a follow-up whose first plan searched nothing", () => {
@@ -391,15 +378,13 @@ describe("retriever pipeline", () => {
     });
     async function followUp() {
       const { events } = await run("And what is his role there?", true, thread);
-      const calls = modelCalls(events);
-      const limitations = diagnosticsWith(events, "results").limitations as string[];
-      return { events, calls, limitations };
+      return { events, steps: stepsOf(events), limitations: limitationsOf() };
     }
 
     it("is planned once more with the appended instruction, and the second plan is used", async () => {
       rankEntries.mockResolvedValue([]);
       fake.invoke.mockResolvedValueOnce(unsupported).mockResolvedValueOnce(planned([sub({ query: "Bob role at ACME", filters: [] })]));
-      const { calls, limitations } = await followUp();
+      const { steps, limitations } = await followUp();
       expect(fake.invoke).toHaveBeenCalledTimes(2);
       expect(fake.invoke.mock.calls[0]![0][0].content).toBe(PLANNER);
       expect(fake.invoke.mock.calls[1]![0][0].content).toBe(`${PLANNER}\n${REPLAN}`);
@@ -407,19 +392,22 @@ describe("retriever pipeline", () => {
       expect(fake.invoke.mock.calls[1]![0][1].content).toBe(fake.invoke.mock.calls[0]![0][1].content);
       expect(rankEntries.mock.calls[0]![0].text).toBe("Bob role at ACME");
       expect(fake.stream).toHaveBeenCalledTimes(1);
-      expect(calls.map((c) => [c.index, c.name])).toEqual([[1, "plan"], [2, "replan"], [3, "answer"]]);
+      expect(steps.map((step) => [step.index, step.name])).toEqual([[1, "plan"], [2, "replan"], [3, "retrieve"], [4, "answer"]]);
+      // Each planning step carries the plan it decided; the second is the one used.
+      expect(steps[0]!.plan).toEqual({ subQueries: [], unsupportedReason: "already answered" });
+      expect((steps[1]!.plan as { subQueries: { query: string }[] }).subQueries[0]!.query).toBe("Bob role at ACME");
       expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing.");
     });
 
     it("still empty, answers as unsupported", async () => {
       fake.invoke.mockResolvedValue(unsupported);
-      const { calls, limitations } = await followUp();
+      const { steps, limitations } = await followUp();
       expect(fake.invoke).toHaveBeenCalledTimes(2);
       expect(rankEntries).not.toHaveBeenCalled();
       const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
       expect(answerInput.unsupportedReason).toBe("already answered");
       expect(answerInput.searches).toEqual([]);
-      expect(calls).toHaveLength(3);
+      expect(steps.map((step) => step.name)).toEqual(["plan", "replan", "retrieve", "answer"]);
       expect(limitations).toContain(
         "Planning was repeated once: the first plan for this follow-up searched nothing; the repeated plan searched nothing either.",
       );
@@ -427,9 +415,11 @@ describe("retriever pipeline", () => {
 
     it("a failing repeated plan leaves the first one standing", async () => {
       fake.invoke.mockResolvedValueOnce(unsupported).mockResolvedValueOnce({ content: "not json" });
-      const { limitations } = await followUp();
+      const { steps, limitations } = await followUp();
       const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
       expect(answerInput.unsupportedReason).toBe("already answered");
+      // The repeated call completed; its output could not be read, so it decided no plan.
+      expect(steps[1]).toEqual({ index: 2, name: "replan", model: true, ...time });
       expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing; the repeated plan failed.");
     });
 
@@ -437,7 +427,7 @@ describe("retriever pipeline", () => {
       fake.invoke.mockResolvedValue(unsupported);
       const { events } = await run("What is Ada's salary?");
       expect(fake.invoke).toHaveBeenCalledTimes(1);
-      expect(modelCalls(events).map((c) => c.name)).toEqual(["plan", "answer"]);
+      expect(stepsOf(events).map((step) => step.name)).toEqual(["plan", "retrieve", "answer"]);
     });
   });
 
@@ -489,8 +479,8 @@ describe("retriever pipeline", () => {
     // The search is restricted to the previous result.
     expect(rankEntries.mock.calls[0]![0].entityIds).toEqual(["ada"]);
     // Another thread has nothing to refer to.
-    const { events } = await run("Which of these people is CTO?", true);
-    expect(diagnosticsWith(events, "results").limitations).toContain(
+    await run("Which of these people is CTO?", true);
+    expect(limitationsOf()).toContain(
       "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
     );
   });
@@ -501,10 +491,10 @@ describe("retriever pipeline", () => {
     const changed: RunnableRetriever = { ...agent, config: saved, scope: { ...agent.scope, config: saved } };
     rankEntries.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO", filters: [], previous: { filterId: null, quote: "these people" } })]));
-    const { events } = await run("Which of these people is CTO?", true, first.thread, undefined, changed);
+    await run("Which of these people is CTO?", true, first.thread, undefined, changed);
     expect(JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content).previousVerifiedResults).toBeNull();
     expect(rankEntries.mock.calls[0]![0].entityIds).toBeNull();
-    expect(diagnosticsWith(events, "results").limitations).toContain(
+    expect(limitationsOf()).toContain(
       "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
     );
   });
@@ -545,7 +535,7 @@ describe("retrieve", () => {
   it("makes exactly one planning call, no answer call, and returns chat's results in chat's order", async () => {
     rankEntries.mockResolvedValue([]);
     const { events } = await run("Everyone in Berlin");
-    const chatRows = diagnosticsWith(events, "results").results as { entityId: string }[];
+    const chatCards = events.find((e) => e.type === "entities")!.entities as { id: string }[];
     vi.clearAllMocks();
     fake.withConfig.mockReturnValue({ invoke: fake.invoke });
     fake.invoke.mockResolvedValue(planned([sub()]));
@@ -553,7 +543,7 @@ describe("retrieve", () => {
     const response = await retrieveQuestion(agent, "Everyone in Berlin", signal());
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.stream).not.toHaveBeenCalled();
-    expect(response.results.map((r) => r.entityId)).toEqual([...new Set(chatRows.map((r) => r.entityId))]);
+    expect(response.results.map((r) => r.entityId)).toEqual(chatCards.map((card) => card.id));
     expect(response).toEqual({
       results: [
         {
@@ -651,10 +641,10 @@ describe("a thread stored before", () => {
     const saved = { ...CONFIG, threshold: 0.5 };
     const changed: RunnableRetriever = { ...agent, config: saved, scope: { ...agent.scope, config: saved } };
     followUp();
-    const { events } = await run("Which of these people is CTO?", true, storedThread(), undefined, changed);
+    await run("Which of these people is CTO?", true, storedThread(), undefined, changed);
     expect(JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content).previousVerifiedResults).toBeNull();
     expect(rankEntries.mock.calls[0]![0].entityIds).toBeNull();
-    expect(diagnosticsWith(events, "results").limitations).toContain(
+    expect(limitationsOf()).toContain(
       "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
     );
   });

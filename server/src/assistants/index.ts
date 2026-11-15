@@ -10,7 +10,7 @@
  */
 
 export { runToolLoop, type ContextBlock, type Guide, type PreparedRun } from "./loop.js";
-export { messageEnd, ModelCalls, type CallEnd, type ModelCall } from "./modelCalls.js";
+export { Diagnostics, messageEnd, type CallEnd, type ModelStep } from "./diagnostics.js";
 export { streamTurn, type ChatTurn, type StreamEvent, type StreamExecution, type TurnStream } from "./session.js";
 export { openThread, readThread } from "./threads/access.js";
 export {

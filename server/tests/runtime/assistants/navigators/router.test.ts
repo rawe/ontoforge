@@ -147,7 +147,11 @@ describe("runtime chat", () => {
     const events = lines(response.body);
     expect(events).toEqual([
       { type: "thread", threadId: expect.any(String) },
-      { type: "navigator.graph", ...NAVIGATOR_TOPOLOGY },
+      {
+        type: "navigator.graph",
+        steps: NAVIGATOR_TOPOLOGY.steps.map(({ id, label, description }) => ({ id, label, description })),
+        edges: NAVIGATOR_TOPOLOGY.edges,
+      },
       { type: "delta", text: "Answer" },
       { type: "final", reply: "Answer" },
     ]);
@@ -157,17 +161,21 @@ describe("runtime chat", () => {
     expect(runtime.navigatorStore.getNavigator).toHaveBeenCalledWith("lens-1", "walker");
   });
 
-  it("on request, sends the turn's model calls on the stream before the final event", async () => {
+  it("on request, sends the turn's steps, then its time, on the stream before the final event", async () => {
     run.mockImplementationOnce(async (turn: NavigatorTurn) => {
-      await turn.trace.calls.start("answer").done({ usage: { input_tokens: 3, output_tokens: 1 }, finishReason: "stop" });
+      await turn.trace.diagnostics.model("answer").done({ usage: { input_tokens: 3, output_tokens: 1 }, finishReason: "stop" });
       return "Answer";
     });
     const response = await app.inject({ method: "POST", url: `${RUNTIME}/_default/chat`, payload: { message: "Who?", diagnostics: true } });
     expect(lines(response.body).slice(2)).toEqual([
       {
         type: "diagnostics",
-        modelCalls: [{ index: 1, name: "answer", durationMs: expect.any(Number), usage: { input: 3, output: 1 }, finishReason: "stop" }],
+        steps: [{
+          index: 1, name: "answer", model: true, startMs: expect.any(Number), durationMs: expect.any(Number),
+          usage: { input: 3, output: 1 }, finishReason: "stop",
+        }],
       },
+      { type: "diagnostics", durationMs: expect.any(Number) },
       { type: "final", reply: "Answer" },
     ]);
   });

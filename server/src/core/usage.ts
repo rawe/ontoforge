@@ -3,7 +3,7 @@
  * LangChain's `usage_metadata`: the whole prompt (its cached parts
  * included), the output, and the parts of the prompt read from or written
  * to the provider's cache. Shared by the token counter (`metrics.ts`) and
- * the model calls of a turn's diagnostics (`assistants/modelCalls.ts`).
+ * the model steps of a turn's diagnostics (`assistants/diagnostics.ts`).
  */
 
 export interface TokenUsage {

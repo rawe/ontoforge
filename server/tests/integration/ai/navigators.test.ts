@@ -49,7 +49,7 @@ async function ask(message: string, threadId?: string): Promise<{ reply: string;
   if (threadId) expect(events[0]!.threadId).toBe(threadId);
   expect(events[1]?.type).toBe("navigator.graph");
   expect(events.at(-1)?.type, JSON.stringify(events.at(-1))).toBe("final");
-  expect(events.at(-2)?.type).toBe("navigator.summary");
+  expect(events.at(-2)).toMatchObject({ type: "navigator.step", id: "answer", status: "done" });
   return { reply: events.at(-1)!.reply as string, events, threadId: events[0]!.threadId as string };
 }
 
@@ -160,7 +160,6 @@ describe("navigator with a real model", () => {
     expect(done).toEqual(expect.arrayContaining(["understand", "anchor", "walk", "focus", "answer"]));
     const firstDelta = events.findIndex((e) => e.type === "delta");
     expect(events.findIndex((e) => e.type === "entities")).toBeLessThan(firstDelta);
-    expect(events.at(-2)).toMatchObject({ modelCalls: 2 });
     // Each link names the stored relation it stands for, directed as stored.
     const links = (events.filter((e) => e.type === "entities").at(-1)!.links as Row[]);
     expect(links.length).toBeGreaterThan(0);

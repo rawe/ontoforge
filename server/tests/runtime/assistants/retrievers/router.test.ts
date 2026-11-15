@@ -63,11 +63,11 @@ describe("retriever list route", () => {
 });
 
 describe("retriever chat route", () => {
-  // A turn that streams its answer and reports its diagnostics.
+  // A turn that streams its answer and records one step.
   const answering = async (...args: unknown[]) => {
     const execution = args[3] as StreamExecution;
+    await execution.diagnostics.work("retrieve", async () => undefined);
     await execution.onToolEvent({ type: "delta", text: "Answer" });
-    await execution.modelCalls.report({ searchCalls: 1 });
     return { reply: "Answer" };
   };
 
@@ -78,8 +78,9 @@ describe("retriever chat route", () => {
     const events = response.body.trim().split("\n").map((line) => JSON.parse(line));
     expect(events).toEqual([
       { type: "thread", threadId: expect.any(String) },
+      { type: "diagnostics", steps: [{ index: 1, name: "retrieve", startMs: expect.any(Number), durationMs: expect.any(Number) }] },
       { type: "delta", text: "Answer" },
-      { type: "diagnostics", searchCalls: 1 },
+      { type: "diagnostics", durationMs: expect.any(Number) },
       { type: "final", reply: "Answer" },
     ]);
     expect(pipeline.loadRunnableRetriever).toHaveBeenCalledWith("main", "find", runtime);

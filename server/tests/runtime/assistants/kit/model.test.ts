@@ -11,7 +11,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 import { describe, expect, it, vi } from "vitest";
 
-import { ModelCalls } from "../../../../src/assistants/index.js";
+import { Diagnostics } from "../../../../src/assistants/index.js";
 import { streamAnswer } from "../../../../src/runtime/assistants/kit/model.js";
 
 /** A fetch answering every request with one 200 event stream. */
@@ -44,15 +44,15 @@ const OPENAI_START = `data: ${JSON.stringify({
   choices: [{ index: 0, delta: { role: "assistant", content: "Half an" }, finish_reason: null }],
 })}\n\n`;
 
-/** One streamed answer; `calls` are the model-call entries it sent. */
+/** One streamed answer; `calls` are the model steps it sent. */
 async function answer(model: ChatAnthropic | ChatOpenAI) {
   const deltas: string[] = [];
   const sent: Record<string, unknown>[] = [];
-  const recorder = new ModelCalls(async (event) => { sent.push(event); });
+  const recorder = new Diagnostics(async (event) => { sent.push(event); });
   const failed = await streamAnswer(
-    model, recorder.start("answer"), "Answer.", "Who?", new AbortController().signal, async (text) => { deltas.push(text); },
+    model, recorder.model("answer"), "Answer.", "Who?", new AbortController().signal, async (text) => { deltas.push(text); },
   ).catch((error: unknown) => error);
-  const calls = sent.flatMap((event) => event.modelCalls as Record<string, unknown>[]);
+  const calls = sent.flatMap((event) => event.steps as Record<string, unknown>[]);
   return { deltas, failed, calls };
 }
 
@@ -140,7 +140,7 @@ describe("an answer the model ended early", () => {
     const controller = new AbortController();
     const model = openai(OPENAI_START + chunk({ content: " answer" }, "length") + "data: [DONE]\n\n");
 
-    const failed = await streamAnswer(model, new ModelCalls().start(), "Answer.", "Who?", controller.signal, async (text) => {
+    const failed = await streamAnswer(model, new Diagnostics().model(), "Answer.", "Who?", controller.signal, async (text) => {
       if (text !== " answer") return;
       // The client reads the rest of the stream meanwhile; then the request is cancelled.
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -186,7 +186,7 @@ describe("the model call of a streamed answer", () => {
     // Input from the first chunk (its cached parts included); the output is the
     // last chunk's running total, not the first chunk's count added to it.
     expect(calls).toEqual([{
-      index: 1, name: "answer", durationMs: expect.any(Number),
+      index: 1, name: "answer", model: true, startMs: expect.any(Number), durationMs: expect.any(Number),
       usage: { input: 5210, output: 312, cacheRead: 4800, cacheWrite: 0 }, finishReason: "end_turn",
     }]);
   });
@@ -195,7 +195,7 @@ describe("the model call of a streamed answer", () => {
     const { calls } = await answer(openai(OPENAI_START + chunk({}, "stop") + OPENAI_USAGE));
 
     expect(calls).toEqual([{
-      index: 1, name: "answer", durationMs: expect.any(Number), usage: { input: 5, output: 2 }, finishReason: "stop",
+      index: 1, name: "answer", model: true, startMs: expect.any(Number), durationMs: expect.any(Number), usage: { input: 5, output: 2 }, finishReason: "stop",
     }]);
   });
 
@@ -204,7 +204,7 @@ describe("the model call of a streamed answer", () => {
 
     expect(failed).toMatchObject({ reason: "answer_cut_off" });
     expect(calls).toEqual([{
-      index: 1, name: "answer", durationMs: expect.any(Number), usage: { input: 5, output: 2 }, finishReason: "length",
+      index: 1, name: "answer", model: true, startMs: expect.any(Number), durationMs: expect.any(Number), usage: { input: 5, output: 2 }, finishReason: "length",
     }]);
   });
 
@@ -214,6 +214,6 @@ describe("the model call of a streamed answer", () => {
 
     const { calls } = await answer(openai(body));
 
-    expect(calls).toEqual([{ index: 1, name: "answer", durationMs: expect.any(Number), failed: true }]);
+    expect(calls).toEqual([{ index: 1, name: "answer", model: true, startMs: expect.any(Number), durationMs: expect.any(Number), failed: true }]);
   });
 });

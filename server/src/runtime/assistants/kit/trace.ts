@@ -5,18 +5,18 @@
  *
  * - `<event>.graph` — the pipeline's topology, once, first;
  * - `<event>.step` — a step `running`, then `done`, `skipped` or `failed`,
- *   with a plain summary and its duration; `round` counts repeats;
+ *   with a plain summary of what it did; `round` counts repeats;
  * - the shared `entities` event (`../entities.ts`) — entity cards and the
  *   links between them, upserted by ref, before the answer;
- * - `<event>.summary` — model calls, duration and counts, once, last;
  * - the answer as the shared `delta` events;
  * - when the chat asked for it, the shared `diagnostics` event after each
- *   model call, named by its step (`calls`).
+ *   step that ran (`diagnostics`): a step that calls the model is recorded
+ *   by its model call, named by the step; any other is a work step.
  *
  * Summaries are written for people: display names, never ids or keys.
  */
 
-import { ModelCalls, type StreamEvent } from "../../../assistants/index.js";
+import { Diagnostics, type StreamEvent } from "../../../assistants/index.js";
 import { entitiesEvent, type EntityCard, type EntityLink } from "../entities.js";
 
 /** One step of a pipeline, as the client draws it. */
@@ -24,7 +24,8 @@ export interface StepDef {
   id: string;
   label: string;
   description: string;
-  /** Whether the step calls the language model. */
+  /** Whether the step calls the language model: its model call is its
+   * diagnostics step. Not sent. */
   model: boolean;
 }
 
@@ -49,19 +50,23 @@ export interface StepReport {
 
 export class Trace {
   private readonly rounds = new Map<string, number>();
-  readonly timings: Record<string, number> = {};
-  private readonly started = performance.now();
+  private readonly modelSteps = new Set<string>();
 
   constructor(
     private readonly event: string,
     private readonly emit: (event: StreamEvent) => Promise<void>,
     private readonly signal: AbortSignal,
-    /** The turn's model calls; each step starts its own by its id. */
-    readonly calls: ModelCalls = new ModelCalls(),
+    /** The turn's steps; a model step is started by its step's own call. */
+    readonly diagnostics: Diagnostics = new Diagnostics(),
   ) {}
 
   graph(topology: Topology): Promise<void> {
-    return this.emit({ type: `${this.event}.graph`, ...topology });
+    for (const step of topology.steps) if (step.model) this.modelSteps.add(step.id);
+    return this.emit({
+      type: `${this.event}.graph`,
+      steps: topology.steps.map(({ id, label, description }) => ({ id, label, description })),
+      edges: topology.edges,
+    });
   }
 
   /** Runs one step: `running`, then `done` with the summary the step set,
@@ -72,18 +77,17 @@ export class Trace {
     this.rounds.set(id, round);
     await this.emit({ type: `${this.event}.step`, id, status: "running", round });
     const report: StepReport = {};
-    const start = performance.now();
     let status: StepStatus = "failed";
     try {
-      const result = await run(report);
+      const result = this.modelSteps.has(id)
+        ? await run(report)
+        : await this.diagnostics.work(id, () => run(report));
       status = "done";
       return result;
     } finally {
-      const durationMs = Math.round(performance.now() - start);
-      this.timings[id] = (this.timings[id] ?? 0) + durationMs;
       if (!this.signal.aborted) {
         await this.emit({
-          type: `${this.event}.step`, id, status, round, durationMs,
+          type: `${this.event}.step`, id, status, round,
           ...(report.summary ? { summary: report.summary } : {}),
         });
       }
@@ -105,15 +109,5 @@ export class Trace {
 
   entities(entities: EntityCard[], links: EntityLink[]): Promise<void> {
     return this.emit(entitiesEvent(entities, links));
-  }
-
-  summary(counts: Record<string, number>): Promise<void> {
-    return this.emit({
-      type: `${this.event}.summary`,
-      modelCalls: this.calls.count,
-      durationMs: Math.round(performance.now() - this.started),
-      ...counts,
-      timings: this.timings,
-    });
   }
 }

@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import {
-  ModelCalls, runToolLoop, type ContextBlock,
+  Diagnostics, runToolLoop, type ContextBlock,
   type Guide, type GraphThread, type PreparedRun, type StreamEvent, type Tool,
 } from "../../src/assistants/index.js";
 import { personText } from "../../src/assistants/threads/access.js";
@@ -50,7 +50,7 @@ async function turn(run: PreparedRun<string[]>, thread: GraphThread = newGraphTh
   const events: StreamEvent[] = [];
   const push = async (event: StreamEvent) => { events.push(structuredClone(event)); };
   const result = await runToolLoop(run, message, thread, {
-    onToolEvent: push, modelCalls: new ModelCalls(diagnostics ? push : undefined),
+    onToolEvent: push, diagnostics: new Diagnostics(diagnostics ? push : undefined),
   });
   return { ...result, events };
 }
@@ -59,7 +59,7 @@ async function turn(run: PreparedRun<string[]>, thread: GraphThread = newGraphTh
 async function diagnosed(run: PreparedRun<string[]>) {
   const events: StreamEvent[] = [];
   const push = async (event: StreamEvent) => { events.push(structuredClone(event)); };
-  const failed = await runToolLoop(run, "go", newGraphThread(), { onToolEvent: push, modelCalls: new ModelCalls(push) })
+  const failed = await runToolLoop(run, "go", newGraphThread(), { onToolEvent: push, diagnostics: new Diagnostics(push) })
     .then(() => undefined, (error: unknown) => error);
   return { events, failed };
 }
@@ -202,7 +202,7 @@ describe("tool loop", () => {
       .rejects.toMatchObject({ reason: "answer_cut_off" });
   });
 
-  it("on request, sends each model call as it ends, unnamed, with what the provider reported", async () => {
+  it("on request, sends each model call and tool run as a step when it ends", async () => {
     const asking = toolCallMessage("echo", { x: "a" });
     asking.usage_metadata = { input_tokens: 5210, output_tokens: 31, total_tokens: 5241, input_token_details: { cache_read: 4800 } };
     asking.response_metadata = { stop_reason: "tool_use" };
@@ -210,14 +210,48 @@ describe("tool loop", () => {
 
     const { events } = await turn(prepared(new FakeToolCallingModel([asking, answering]), [echo()]), newGraphThread(), "go", true);
 
-    expect(events.map((e) => e.type)).toEqual(["diagnostics", "helper.tool_call", "helper.tool_result", "diagnostics"]);
+    expect(events.map((e) => e.type)).toEqual(["diagnostics", "helper.tool_call", "diagnostics", "helper.tool_result", "diagnostics"]);
+    const time = { startMs: expect.any(Number), durationMs: expect.any(Number) };
     expect(events.filter((e) => e.type === "diagnostics")).toEqual([
       {
         type: "diagnostics",
-        modelCalls: [{ index: 1, durationMs: expect.any(Number), usage: { input: 5210, output: 31, cacheRead: 4800 }, finishReason: "tool_use" }],
+        steps: [{ index: 1, model: true, ...time, usage: { input: 5210, output: 31, cacheRead: 4800 }, finishReason: "tool_use" }],
       },
-      { type: "diagnostics", modelCalls: [{ index: 2, durationMs: expect.any(Number), finishReason: "stop" }] },
+      { type: "diagnostics", steps: [{ index: 2, name: "echo", ...time }] },
+      { type: "diagnostics", steps: [{ index: 3, model: true, ...time, finishReason: "stop" }] },
     ]);
+  });
+
+  it("times parallel tool runs on the turn's clock, so they overlap; an {error} result is no failure", async () => {
+    const run = async (args: Record<string, unknown>) => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      if (args.x === "bad") throw new Expected("no such x");
+      return { echoed: args.x };
+    };
+    const model = new FakeToolCallingModel([calls("bad", "ok"), new AIMessage("done")]);
+    model.responses[0]!.tool_calls!.push({ name: "echo", args: { x: 1 }, id: "c2", type: "tool_call" });
+
+    const { events } = await turn(prepared(model, [echo({ run })]), newGraphThread(), "go", true);
+
+    const steps = events.filter((e) => e.type === "diagnostics").flatMap((e) => e.steps as Record<string, number>[]);
+    const tools = steps.filter((step) => step.name === "echo");
+    expect(tools.map((step) => step.index).sort()).toEqual([2, 3, 4]);
+    expect(steps.some((step) => "failed" in step)).toBe(false);
+    const [first, second] = tools.filter((step) => step.durationMs >= 25).sort((a, b) => a.startMs - b.startMs);
+    expect(second!.startMs).toBeLessThan(first!.startMs + first!.durationMs);
+    expect(steps.at(-1)).toMatchObject({ index: 5, model: true });
+    expect(steps.at(-1)!.startMs).toBeGreaterThanOrEqual(first!.startMs + first!.durationMs - 1);
+  });
+
+  it("marks a tool run that threw as a failed step before the turn ends", async () => {
+    const model = new FakeToolCallingModel([calls("a"), new AIMessage("never")]);
+    const { events, failed } = await diagnosed(prepared(model, [echo({ run: async () => { throw new Error("boom"); } })]));
+
+    expect(failed).toBeInstanceOf(Error);
+    expect(events.filter((e) => e.type === "diagnostics").at(-1)).toEqual({
+      type: "diagnostics",
+      steps: [{ index: 2, name: "echo", startMs: expect.any(Number), durationMs: expect.any(Number), failed: true }],
+    });
   });
 
   it("sends no diagnostics unless asked", async () => {
@@ -232,7 +266,10 @@ describe("tool loop", () => {
     for (const tools of [[echo()], []]) {
       const { events, failed } = await diagnosed(prepared(failing, tools));
       expect(failed).toMatchObject({ reason: "rate_limited" });
-      expect(events).toEqual([{ type: "diagnostics", modelCalls: [{ index: 1, durationMs: expect.any(Number), failed: true }] }]);
+      expect(events).toEqual([{
+        type: "diagnostics",
+        steps: [{ index: 1, model: true, startMs: expect.any(Number), durationMs: expect.any(Number), failed: true }],
+      }]);
     }
     warned.mockRestore();
 
@@ -242,7 +279,10 @@ describe("tool loop", () => {
     expect(failed).toMatchObject({ reason: "answer_cut_off" });
     expect(events).toEqual([{
       type: "diagnostics",
-      modelCalls: [{ index: 1, durationMs: expect.any(Number), usage: { input: 10, output: 4096 }, finishReason: "length" }],
+      steps: [{
+        index: 1, model: true, startMs: expect.any(Number), durationMs: expect.any(Number),
+        usage: { input: 10, output: 4096 }, finishReason: "length",
+      }],
     }]);
   });
 

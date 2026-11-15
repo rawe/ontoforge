@@ -81,8 +81,7 @@ export async function loadRunnableNavigator(
   return { key, config, loaded };
 }
 
-/** One chat turn: the topology first, then the turn with its trace, the
- * summary last. */
+/** One chat turn: the topology first, then the turn with its trace. */
 export async function runNavigatorTurn(
   runnable: RunnableNavigator,
   lensKey: string,
@@ -91,8 +90,8 @@ export async function runNavigatorTurn(
   thread: GraphThread,
   execution: StreamExecution,
 ): Promise<{ reply: string }> {
-  const { signal, onToolEvent: emit, modelCalls } = execution;
-  const trace = new Trace(NAVIGATOR_EVENT, emit, signal, modelCalls);
+  const { signal, onToolEvent: emit, diagnostics } = execution;
+  const trace = new Trace(NAVIGATOR_EVENT, emit, signal, diagnostics);
   await trace.graph(NAVIGATOR_TOPOLOGY);
   const reply = await run({
     key: runnable.key,

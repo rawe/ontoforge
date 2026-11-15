@@ -14,9 +14,9 @@
  * Chat stream events: `retriever.phase` (start/end of plan, retrieve,
  * answer), the shared `entities` (`../entities.ts`: the results handed to
  * the answer model, before it streams), `delta` (answer text), the
- * shared `diagnostics` (on request: each model call with its texts, then
- * the plan, results, limitations, search calls and timings as they become
- * known), then the transport's `final` or `error`.
+ * shared `diagnostics` (on request: the model steps `plan`, `replan` and
+ * `answer`, a planning step with the plan it decided, and the work step
+ * `retrieve`), then the transport's `final` or `error`.
  *
  * Retrieve runs the first two phases only (`retrieveQuestion`): one
  * planning call without a conversation, then retrieval; it returns the
@@ -44,8 +44,8 @@ import {
 } from "@langchain/langgraph";
 
 import {
+  Diagnostics,
   messageEnd,
-  ModelCalls,
   type GraphThread,
   type StreamExecution,
 } from "../../../assistants/index.js";
@@ -72,7 +72,6 @@ import {
   DEFAULT_RETRIEVER_NAME,
   defaultRetrieverConfig,
 } from "./defaultRetriever.js";
-import { modelInputTrace } from "./modelTrace.js";
 import {
   diagnosticPlan,
   PLANNER,
@@ -89,7 +88,6 @@ import { parsePlannerOutput } from "./plannerOutput.js";
 import {
   answerSearches,
   boundContext,
-  diagnosticResults,
   entityCards,
   filterValues,
   resultIds,
@@ -100,15 +98,6 @@ import {
   type Retrieval,
   type RetrievalScope,
 } from "./retrieve.js";
-
-/** Characters of model output kept in diagnostics. */
-const OUTPUT_TRACE_CHARACTERS = 12_000;
-
-/** A model call's output as its diagnostics entry carries it, bounded. */
-const outputTrace = (output: string) => ({
-  output: output.slice(0, OUTPUT_TRACE_CHARACTERS),
-  outputTruncated: output.length > OUTPUT_TRACE_CHARACTERS,
-});
 
 /** A stored retriever, valid in its lens, ready to answer. */
 export interface RunnableRetriever {
@@ -234,12 +223,9 @@ interface Planning {
   history: History[];
   previous: Previous | undefined;
   plannerModel: PlannerModel;
-  /** Accumulates `planModel` and `validation`. */
-  timings: Record<string, number>;
-  /** Records every planning call, its texts included, and reports the
-   * diagnostics as planning proceeds: the call first, so a failed plan
-   * stays diagnosable, then the checked plan. */
-  calls: ModelCalls;
+  /** Records every planning call as a model step, with the checked plan
+   * when there is one. */
+  diagnostics: Diagnostics;
 }
 
 /**
@@ -249,7 +235,7 @@ interface Planning {
  * planning context over the cap, a failed call and a malformed plan.
  */
 export async function planQuestion(planning: Planning): Promise<{ plan: Plan; notes: string[] }> {
-  const { retriever, scope, modes, message, history, previous, plannerModel, timings, calls } = planning;
+  const { retriever, scope, modes, message, history, previous, plannerModel, diagnostics } = planning;
   const { signal } = scope;
   const values = await filterValues(scope);
   signal.throwIfAborted();
@@ -265,38 +251,38 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
         : "Planning context exceeds the limit; choose fewer indices or filters.",
     );
   }
-  const planWith = async (systemPrompt: string, callPhase: string) => {
-    const modelStart = performance.now();
-    const call = calls.start(callPhase, modelInputTrace(systemPrompt, input));
+  const planWith = async (systemPrompt: string, name: string) => {
+    const step = diagnostics.model(name);
     let response;
     try {
       response = await plannerModel.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)], { signal });
     } catch (error) {
-      await call.failed();
+      await step.failed();
       signal.throwIfAborted();
       console.warn(`Planning model failed: ${error instanceof Error ? error.message : String(error)}`);
       throw modelFailure(error);
     }
-    const output = contentText(response.content);
-    timings.planModel = (timings.planModel ?? 0) + performance.now() - modelStart;
+    const end = messageEnd(response);
     const rawFinishReason = response.response_metadata?.finish_reason;
     const finishReason = typeof rawFinishReason === "string" ? rawFinishReason : undefined;
-    // Visible model output first, so a failed plan stays diagnosable.
-    await call.done(messageEnd(response), outputTrace(output));
-    await calls.report({ timings: { planModel: timings.planModel } });
-    const validation = performance.now();
-    const checked = validatePlan(
-      parsePlannerOutput(output, finishReason),
-      retriever.config,
-      scope.lens,
-      modes,
-      message,
-      history,
-      previous,
-      values,
-    );
-    timings.validation = (timings.validation ?? 0) + performance.now() - validation;
-    await calls.report({ plan: diagnosticPlan(checked.plan, retriever.config) });
+    // The step ends once its plan is checked; a plan refused leaves it without one.
+    let checked;
+    try {
+      checked = validatePlan(
+        parsePlannerOutput(contentText(response.content), finishReason),
+        retriever.config,
+        scope.lens,
+        modes,
+        message,
+        history,
+        previous,
+        values,
+      );
+    } catch (error) {
+      await step.done(end);
+      throw error;
+    }
+    await step.done(end, diagnosticPlan(checked.plan, retriever.config));
     return checked;
   };
   const first = await planWith(PLANNER, "plan");
@@ -336,7 +322,7 @@ export async function retrieveQuestion(
   signal.throwIfAborted();
   const scope: RetrievalScope = { ...retriever.scope, signal };
   const { plannerModel } = models();
-  // Timings and model calls are recorded for diagnostics, which only chat sends.
+  // Steps are diagnostics, which only chat sends.
   const { plan, notes } = await planQuestion({
     retriever,
     scope,
@@ -345,8 +331,7 @@ export async function retrieveQuestion(
     history: [],
     previous: undefined,
     plannerModel,
-    timings: {},
-    calls: new ModelCalls(),
+    diagnostics: new Diagnostics(),
   });
   signal.throwIfAborted();
   const retrieval = await retrieve(scope, plan);
@@ -373,27 +358,19 @@ export async function chat(
   execution: StreamExecution,
 ): Promise<Record<string, unknown>> {
   // Without diagnostics the stream carries progress and the answer only.
-  const { signal, onToolEvent: emit, modelCalls: calls } = execution;
-  const started = performance.now();
-  const timings: Record<string, number> = {};
+  const { signal, onToolEvent: emit, diagnostics } = execution;
   const scope: RetrievalScope = { ...retriever.scope, signal };
   const modes = availableModes(retriever.scope.store);
-  let firstDelta = false;
-  let searchCalls = 0;
   const { model, plannerModel } = models();
   const hash = configHash(retriever.config);
 
   async function phase<T>(name: string, run: () => Promise<T>): Promise<T> {
     signal.throwIfAborted();
     await emit({ type: "retriever.phase", phase: name, status: "start" });
-    const start = performance.now();
     try {
       return await run();
     } finally {
-      timings[name] = performance.now() - start;
-      if (!signal.aborted) {
-        await emit({ type: "retriever.phase", phase: name, status: "end", durationMs: timings[name] });
-      }
+      if (!signal.aborted) await emit({ type: "retriever.phase", phase: name, status: "end" });
     }
   }
 
@@ -421,27 +398,17 @@ export async function chat(
     .addNode("planning", async (state) => {
       const { previous, history } = state;
       const { plan, notes } = await phase("plan", () =>
-        planQuestion({ retriever, scope, modes, message, history, previous, plannerModel, timings, calls }),
+        planQuestion({ retriever, scope, modes, message, history, previous, plannerModel, diagnostics }),
       );
       return { plan, notes };
     })
     .addNode("retrieve", async (state) => {
       const { plan, previous, notes } = state;
-      const retrieval = await phase("retrieve", () => retrieve(scope, plan, previous));
+      const retrieval = await phase("retrieve", () => diagnostics.work("retrieve", () => retrieve(scope, plan, previous)));
       retrieval.limitations.push(...notes);
-      const t = performance.now();
       const context = boundContext(retrieval, plan, scope.lens, retriever.config);
-      timings.context = performance.now() - t;
       // The results the answer model gets, as cards, before it streams.
       if (context.included.length > 0) await emit(entitiesEvent(entityCards(context.included, scope.lens), []));
-      timings.search = retrieval.searchMs;
-      searchCalls = retrieval.searchCalls;
-      await calls.report({
-        results: diagnosticResults(retrieval),
-        limitations: context.limitations,
-        searchCalls: retrieval.searchCalls,
-        timings: { ...timings },
-      });
       return { retrieval, context };
     })
     .addNode("answer", async (state) => {
@@ -455,14 +422,8 @@ export async function chat(
           results: context.results,
           limitations: context.limitations,
         });
-        const call = calls.start("answer", modelInputTrace(ANSWER, input));
-        return streamAnswer(model, call, ANSWER, input, signal, async (delta) => {
-          if (!firstDelta) {
-            firstDelta = true;
-            timings.firstDelta = performance.now() - started;
-          }
-          await emit({ type: "delta", text: delta });
-        }, outputTrace);
+        return streamAnswer(model, diagnostics.model("answer"), ANSWER, input, signal,
+          (delta) => emit({ type: "delta", text: delta }));
       });
       return { reply };
     })
@@ -492,8 +453,5 @@ export async function chat(
     { messages: [new HumanMessage(message)] },
     { signal, configurable: { thread_id: thread.threadId } },
   );
-  timings.total = performance.now() - started;
-  timings.answerModel = timings.answer ?? 0;
-  await calls.report({ timings, searchCalls });
   return { reply: result.reply };
 }

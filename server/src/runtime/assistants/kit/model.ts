@@ -13,7 +13,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { HumanMessage, SystemMessage, type UsageMetadata } from "@langchain/core/messages";
 import type { ChatOpenAI } from "@langchain/openai";
 
-import { messageEnd, type ModelCall } from "../../../assistants/index.js";
+import { messageEnd, type ModelStep } from "../../../assistants/index.js";
 import { settings } from "../../../config.js";
 import { createAiModel, cutOff, finishReason, getAiModel, modelFailure } from "../../../core/ai.js";
 import { type ModelError, ValidationError } from "../../../core/exceptions.js";
@@ -54,20 +54,23 @@ export function contentText(content: unknown): string {
 export type JsonSchema = Record<string, unknown>;
 
 /**
- * One structured call, recorded as `call`: the model answers with JSON of
- * the schema, which is parsed and returned. A failed call fails the step
- * with the reason the provider gave (`modelFailure`), unparsable output as
- * a validation error; there is no automatic retry.
+ * One structured call, recorded as `step`: the model answers with JSON of
+ * the schema, which `read` (it must not throw) turns into the step's value
+ * and, optionally, the plan its diagnostics carry. A failed call fails the
+ * step with the reason the provider gave (`modelFailure`), unparsable
+ * output as a validation error (the step then carries no plan); there is
+ * no automatic retry.
  */
-export async function decide(
+export async function decide<T>(
   model: BaseChatModel,
-  call: ModelCall,
+  step: ModelStep,
   name: string,
   schema: JsonSchema,
   system: string,
   input: string,
   signal: AbortSignal,
-): Promise<unknown> {
+  read: (output: unknown) => { value: T; plan?: Record<string, unknown> },
+): Promise<T> {
   const bound = settings.AI_PROVIDER === "anthropic"
     ? (model as ChatAnthropic).withConfig({ outputConfig: { format: { type: "json_schema", schema } } })
     : (model as ChatOpenAI).withConfig({
@@ -77,36 +80,39 @@ export async function decide(
   try {
     response = await bound.invoke([new SystemMessage(system), new HumanMessage(input)], { signal });
   } catch (error) {
-    await call.failed();
+    await step.failed();
     signal.throwIfAborted();
     console.warn(`${name} model call failed: ${error instanceof Error ? error.message : String(error)}`);
     throw modelFailure(error);
   }
-  await call.done(messageEnd(response));
+  const end = messageEnd(response);
   const output = contentText(response.content);
+  let parsed: unknown;
   try {
     // Some providers wrap JSON in a fence despite the format.
-    return JSON.parse(output.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, ""));
+    parsed = JSON.parse(output.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, ""));
   } catch {
+    await step.done(end);
     throw new ValidationError(`The language model answered no readable JSON (${name}).`);
   }
+  const decided = read(parsed);
+  await step.done(end, decided.plan);
+  return decided.value;
 }
 
-/** One streamed call, recorded as `call` with the usage of the whole call;
+/** One streamed call, recorded as `step` with the usage of the whole call;
  * every text delta goes to `onDelta`, and the whole text is returned. A
  * failed call fails with the reason the provider gave (`modelFailure`);
  * there is no automatic retry. An answer the model ended early fails too
  * (`cutOff`), once its stream has ended: its text was streamed, but it is
- * no answer. `detail` adds fields to the call's entry from the whole text
- * (the retriever's). */
+ * no answer. */
 export async function streamAnswer(
   model: BaseChatModel,
-  call: ModelCall,
+  step: ModelStep,
   system: string,
   input: string,
   signal: AbortSignal,
   onDelta: (text: string) => Promise<void>,
-  detail?: (text: string) => Record<string, unknown>,
 ): Promise<string> {
   let output = "";
   let usage: UsageMetadata | undefined;
@@ -131,14 +137,14 @@ export async function streamAnswer(
       }
     }
   } catch (error) {
-    await call.failed(detail?.(output));
+    await step.failed();
     signal.throwIfAborted();
     console.warn(`Answer model failed: ${error instanceof Error ? error.message : String(error)}`);
     throw modelFailure(error);
   }
   // Cancelled while the last text was handed on: a cancellation, not a cut-off answer.
   signal.throwIfAborted();
-  await call.done({ usage, finishReason: reason }, detail?.(output));
+  await step.done({ usage, finishReason: reason });
   if (cut !== undefined) throw cut;
   return output;
 }

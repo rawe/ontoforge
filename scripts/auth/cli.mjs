@@ -5,6 +5,7 @@
 //
 //   node scripts/auth/cli.mjs [--server http://localhost:8000] [--client-id ontoforge-cli]
 //   node scripts/auth/cli.mjs --mcp http://localhost:8000/mcp/ontologies/<key>/runtime/lenses/<lens>
+//   TOKEN=$(node scripts/auth/cli.mjs --token)     # only the access token, e.g. for curl
 //
 // Without --mcp it asks for the REST API (resource PUBLIC_URL/api) and prints who is signed
 // in (GET /api/auth/me). With --mcp it asks for that one MCP mount and lists its tools.
@@ -164,11 +165,15 @@ async function main() {
     resource,
     clientId,
     openUrl: (url) => {
-      console.log(`Opening the browser to sign in. If it does not open, visit:\n  ${url}`);
+      console.error(`Opening the browser to sign in. If it does not open, visit:\n  ${url}`);
       openBrowser(url);
     },
   });
 
+  if (process.argv.includes('--token')) {
+    console.log(tokens.access_token);
+    return;
+  }
   if (mount) {
     const tools = await listTools(mount, tokens.access_token);
     console.log(`${tools.length} tools on ${mount}:`);

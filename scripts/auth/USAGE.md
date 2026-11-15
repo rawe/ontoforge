@@ -29,6 +29,7 @@ and a loopback redirect, opens the browser, and then calls OntoForge with the to
 node scripts/auth/cli.mjs                                   # REST: prints who is signed in and their roles
 node scripts/auth/cli.mjs --mcp http://localhost:8000/mcp/ontologies/<key>/runtime/lenses/<lens>   # that mount's tools
 node scripts/auth/cli.mjs --server https://ontoforge.example.com --client-id my-tool
+TOKEN=$(node scripts/auth/cli.mjs --token)                    # only the access token for the REST API, e.g. for curl
 ```
 
 | Option | Default | |
@@ -91,8 +92,7 @@ and the service principal (an e2e user cannot be deleted), and one disabled user
 `e2e-<random>` per run with the concurrent check — its Keycloak account is deleted.
 
 The consent page is answered as a browser answers it: a form POST carrying the consent page's
-`Origin` (`PUBLIC_URL`'s) and `Referer`. A real browser's run is still worth doing by hand
-once: `node scripts/auth/cli.mjs` and Allow.
+`Origin` (`PUBLIC_URL`'s) and `Referer`.
 
 ### What each step proves
 

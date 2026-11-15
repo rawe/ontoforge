@@ -5,8 +5,8 @@ export function parsePlannerOutput(output: string, finishReason?: string): unkno
   const trimmed = output.trim();
   if (!trimmed) {
     throw new ValidationError(finishReason === 'length'
-      ? 'Planning model reached its output limit without a visible plan. See model diagnostics.'
-      : 'Planning model returned an empty plan. See model diagnostics.');
+      ? 'Planning model reached its output limit without a visible plan.'
+      : 'Planning model returned an empty plan.');
   }
   const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
   const source = fence ? fence[1]! : trimmed;
@@ -14,7 +14,7 @@ export function parsePlannerOutput(output: string, finishReason?: string): unkno
     return JSON.parse(source);
   } catch {
     throw new ValidationError(finishReason === 'length'
-      ? 'Planning model output was truncated at its token limit and is not valid JSON. See model diagnostics.'
-      : 'Planning model returned invalid JSON. See model diagnostics.');
+      ? 'Planning model output was truncated at its token limit and is not valid JSON.'
+      : 'Planning model returned invalid JSON.');
   }
 }

@@ -383,8 +383,9 @@ Agents, retrievers and navigators are each built end to end on their own: each k
 its modeling and runtime routes under `assistants/<kind>`, its own storage, its own check
 of a configuration, its built-in default and its place in transfer under the lens's
 `assistants`. Every kind shares the
-[thread store](#thread-store), the chat request and stream frame, and the one `entities`
-event ([interfaces](interfaces/assistants-rest.md#assistant-chat-and-threads)). Runtime's assistant kit holds the
+[thread store](#thread-store), the chat request and stream frame, the one `entities`
+event and the one opt-in `diagnostics` event of a turn's steps, to which a kind adds only
+by recording its steps ([interfaces](interfaces/assistants-rest.md#assistant-chat-and-threads)). Runtime's assistant kit holds the
 kind-neutral helpers: the live trace of a fixed pipeline's steps, and the model calls —
 structured output for a decision, a stream for the answer.
 

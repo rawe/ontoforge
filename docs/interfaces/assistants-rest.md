@@ -90,14 +90,14 @@ same shape for every kind:
 | Field | Content |
 |---|---|
 | `index` | 1, 2, … in the order the steps started; the step's identity |
-| `name` | A retriever's `plan`, `replan`, `retrieve`, `answer`; a navigator's step id (a repeated step is one step per round); the tool's name for an agent and the Studio helper. Absent on their model calls |
+| `name` | A stable key in lower case with underscores: a retriever's `plan`, `replan`, `retrieve`, `answer`; a navigator's step id (a repeated step is one step per round); the tool's name for an agent and the Studio helper. Absent on their model calls |
 | `model` | `true` on a step that is one model call; absent on other work |
 | `startMs` | Whole milliseconds from the turn's start, measured by the server; steps that ran in parallel overlap |
 | `durationMs` | Whole milliseconds |
 | `usage` | Model steps only: `input` (the whole prompt, cached parts included), `output`, `cacheRead`, `cacheWrite` — each only when the provider reported it, a reported 0 kept; absent when nothing was reported |
 | `finishReason` | Model steps only, as the provider gave it, when it did |
 | `failed` | `true` for a step that threw; a failed model call has no usage. A tool that answered with an error has not failed |
-| `plan` | What a planning step decided, when its output could be read: on a retriever's `plan` and `replan` steps the plan below; on a navigator's `understand` step `summary`, the sentence it read the question as |
+| `detail` | Optional, on any step: one string of plain text about what the step did or decided, for a person to read; it may hold line breaks. On a retriever's `plan` and `replan` steps its plan in words, on a navigator's `understand` step the sentence it read the question as — each only when the step's output could be read |
 
 A client merges a turn's events: `steps` by `index`, and `durationMs` replaces the one
 before. Totals — model calls, tokens — are the client's to add up. Time outside every step
@@ -135,11 +135,9 @@ reached the answer model, one `entities` event carries them, all evidence, witho
 with or without diagnostics. Its own events:
 `retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`).
 Its [diagnostics](#diagnostics) steps are `plan`, `replan` for a follow-up's repeated
-planning, `retrieve` and `answer`. The `plan` of a planning step: `subQueries` — each
-`indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`, and
-the filter's definition from the retriever's configuration: `entityType`, `path`, `field`)
-and `previous` — and `unsupportedReason`. The plan the answer used is the last step's that
-carries one.
+planning, `retrieve` and `answer`. The `detail` of a planning step is
+[its plan in words](../capabilities/retrievers.md#diagnostics); the plan the answer used
+is the last step's that carries one.
 
 **Read a thread.** As [shared](#assistant-chat-and-threads).
 
@@ -187,7 +185,7 @@ its own events, all in display names, never ids or keys:
 | Event `type` | Fields | Meaning |
 |---|---|---|
 | `navigator.graph` | `steps` (`id`, `label`, `description`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
-| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends an optional `summary` of what it did | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary. `understand` ends without a summary: its sentence is the `plan` of its [diagnostics](#diagnostics) step |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends an optional `summary` of what it did | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary. `understand` ends without a summary: its sentence is the `detail` of its [diagnostics](#diagnostics) step |
 
 The answer cites evidence by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
 

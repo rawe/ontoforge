@@ -160,8 +160,8 @@ A turn streams its work before its answer:
   sent after the anchors, after each walk and after the focus, each time replacing what the
   client had under the same refs.
 - **Diagnostics**, on request — its steps, each named by its step id, a repeated walk once
-  per round, [as every assistant reports them](threads.md#diagnostics); Understand's carries
-  the sentence it read the question as ("Looking for Project · starting at “Lena” · path
+  per round, [as every assistant reports them](threads.md#diagnostics); Understand's detail
+  is the sentence it read the question as ("Looking for Project · starting at “Lena” · path
   requires").
 
 Only evidence can be cited. The event format is in

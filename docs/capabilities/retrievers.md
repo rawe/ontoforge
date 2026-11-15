@@ -281,10 +281,24 @@ each cut to 2,000 characters.
 
 On request, the stream also reports the retriever's steps
 [as every assistant reports them](threads.md#diagnostics): planning, planning again for a
-follow-up, the retrieval and the answer. A planning step carries the checked plan — each
-planned filter with its definition, so the plan reads without the configuration — or none
-when the planner's output could not be read; the plan the answer used is the last one
-reported. Diagnostics are for debugging: they are sent only when a question asks for
+follow-up, the retrieval and the answer. A planning step's detail is the checked plan in
+words, in display names: one line per search with the indices it searches, its query with
+its variants and whether it searches by meaning, by keywords or both — or that it has no
+query and lists exactly —, the relation groups it is restricted to when not all, its
+exact filters with their values, and whether previous results restrict it; then, when the
+planner found the question not answerable from the lens, a line with the reason.
+
+```text
+Search 1 in People by employment: “works at ACME” (also “employed by ACME”), by keywords · relation groups: Employment · filters: lives in City Name: Berlin
+Search 2 in People by home city, People: “lives in Berlin”, by keywords
+```
+
+```text
+Not answerable: The lens holds no salaries.
+```
+
+A planning step whose output could not be read has no detail; the plan the answer used is
+the last one reported. Diagnostics are for debugging: they are sent only when a question asks for
 them, and any question may. Progress — which phase runs —, the entities and the answer
 text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
 

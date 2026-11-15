@@ -6,7 +6,7 @@ Current behavior: [Diagnostics](../capabilities/threads.md#diagnostics),
 ## Context
 
 Tuning any assistant needs to see where a turn's time and tokens went, step by step, and
-what a planning step decided. The kinds' work events — an agent's tool activity, a
+what a step decided. The kinds' work events — an agent's tool activity, a
 retriever's phases, a navigator's steps — differ in shape and are what each kind's view is
 built from; times, token counts and model-call counts were spread over them and over
 kind-specific fields.
@@ -15,8 +15,9 @@ kind-specific fields.
 
 Every assistant kind takes the same opt-in `diagnostics` request field and answers it with
 one shared `diagnostics` event: the turn's steps — each model call and each other piece of
-work — in one shape, measured by the server, with an optional plan on a planning step,
-then the turn's time; nothing a kind adds besides. The kinds' events keep their names and
+work — in one shape, measured by the server, with an optional detail on any step, plain
+text about what it did or decided, then the turn's time; nothing a kind adds besides, so
+a client shows every kind's diagnostics without knowing the kind. The kinds' events keep their names and
 say what was done and found, never how long it took or what it cost.
 
 ## Rejected
@@ -32,7 +33,11 @@ say what was done and found, never how long it took or what it cost.
 - **Removing the kind prefix from event names.** The readers on both sides are already
   shared through the prefix; the rename would change every client and save nothing.
 - **An always-on plan event.** A retriever's plan says what it decided to search, but it
-  serves tuning, not the answer's reader; it rides on its planning step in diagnostics.
+  serves tuning, not the answer's reader; it is the detail of its planning step in
+  diagnostics.
 - **A second opt-in for the plan.** A second request field would bring a second switch and
   a second channel for one kind's tuning data; the plan is small enough to come with the
   steps.
+- **A structured value on a step, shaped by its kind.** A retriever's plan as an object
+  and a navigator's as another would make a client know the kind to read a step, and every
+  new kind would need work in every client; text reads the same for all.

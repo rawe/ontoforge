@@ -87,16 +87,25 @@ A message may ask for **diagnostics**: how long its turn took and what it cost, 
 debugging and tuning an assistant. Every assistant reports them the same way, as the
 turn's **steps**: each model call is one step, and each other piece of work — a tool call,
 a pipeline step that calls no model — is one too. A step has its number in the order the
-steps started, its name — the pipeline step or the tool —, when it started from the turn's
-start and how long it took, all measured by the server, so steps that ran in parallel
-overlap, and whether it failed. A model step adds the tokens the provider reported (the
+steps started, its name — the pipeline step or the tool, a stable key that reads well as
+words —, when it started from the turn's start and how long it took, all measured by the
+server, so steps that ran in parallel overlap, and whether it failed. A model step adds the tokens the provider reported (the
 whole prompt with its cached parts, the output, what was read from and written to the
 provider's cache; a count the provider did not report is left out, never estimated) and
-the reason the model gave for stopping. A planning step adds what it decided: a
+the reason the model gave for stopping. Any step may add a **detail**: short plain text
+about what it did or decided, written for the person reading diagnostics, in display
+names, with a line break between its lines — a
 [retriever's plan](retrievers.md#diagnostics), the sentence a
-[navigator](navigators.md#understand) read the question as. A step is reported as soon as
+[navigator](navigators.md#understand) read the question as. A detail is text to read,
+never data to parse, and never needed to show the answer. A step is reported as soon as
 it ends, so a turn that fails has already shown the steps before it; last comes the
 turn's whole time.
+
+Nothing in diagnostics depends on the assistant kind. A kind reports the steps its turn
+takes, each with its name and, where it helps, a detail, and adds nothing else; a client
+shows any step from these fields alone — its name as words, its time, its tokens, its
+detail as text. So a new kind, or a new step of an existing one, needs no change in a
+client.
 
 Nothing of this is sent unless asked, and the work and answer are the same either way.
 What a turn did and found — an agent's tool activity, a retriever's phase, a navigator's

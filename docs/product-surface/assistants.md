@@ -266,11 +266,11 @@ Inside:
 - **Summary** — the answer's time, the number of model calls and of failed steps, the
   tokens in, out, read from and written to the cache — each only as the provider reported
   it, a reported 0 shown.
-- **Steps** — one row per step in order: its number, its readable name — a tool's name,
-  a pipeline step's label, "Model call" for an agent's model call —, a bar at its real
-  start on the scale of the answer's time, so parallel tool calls overlap, and its time; a
-  model call adds its tokens and finish reason below, a failed step is red. A planning
-  step opens to its plan: a retriever's per sub-query the indices searched, the relation
-  groups, the query and its mode with variants, and the exact filters, the reason when the
-  question cannot be answered from the lens, and the raw plan; a navigator's Understand
-  the sentence it read the question as.
+- **Steps** — one row per step in order: its number, its name — the step's name as the
+  server sent it, with spaces for its underscores and its first letter in upper case, the
+  same rule for every kind; "Model call" for a model call without a name —, a bar at its
+  real start on the scale of the answer's time, so parallel tool calls overlap, and its
+  time; a model call adds its tokens and finish reason below, a failed step is red. A
+  step that has a detail opens to it: the text as the server wrote it, with its line
+  breaks — a retriever's plan, the sentence a navigator's Understand read the question
+  as.

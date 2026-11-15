@@ -39,7 +39,7 @@ The modeling mount serves requests even when its ontology does not exist yet —
 what lets `ensure_ontology` provision it; until then every other tool answers a
 not-found tool error. With authentication on it does not: a missing ontology answers not
 found like any ontology the caller holds no role in, and `ensure_ontology` creates
-nothing. How a client signs in: [Sign-in](server.md#sign-in). The runtime mount requires both its ontology and its lens to
+nothing. How a client signs in: [Authorization server](server.md#authorization-server). The runtime mount requires both its ontology and its lens to
 exist, and a ruleset mount its ruleset as well; its tools answer not-found tool errors
 otherwise, reads included.
 

@@ -32,27 +32,29 @@ Three authentication methods resolve callers to principals:
   page, if available. State-changing requests authenticated by the session cookie must
   originate from the web client's address. Browser sign-in exists only when the deployment
   names that address; without it, callers use bearer tokens.
-- **REST with a bearer token.** Send an access token issued by the provider for
-  OntoForge's audience and required scope in the `Authorization` header using the
-  `Bearer` scheme. OntoForge rejects ID tokens, tokens with an invalid issuer or
-  audience, tokens missing the required scope, expired tokens, and tokens without a
-  valid signature from the provider. When a request includes a bearer token,
-  authentication uses that token alone and ignores any session cookie. This is how every
-  other client calls OntoForge, including a frontend with a server side of its own that
-  signs its users in at the provider and sends their tokens.
-- **MCP over OAuth.** The MCP mounts take bearer tokens only. A client without one is told
-  where to sign in, registers itself at the provider and signs its user in through the
-  browser. Its token names OntoForge's audience only when the client asks for OntoForge's
-  scope, which the mount advertises. Clients must connect through the server's public
-  address because that address forms part of the OAuth resource identifier.
+- **A client acting for a person.** An MCP client, or an application calling REST for a
+  person — a command-line tool, a browser extension, another web UI — gets its token from
+  OntoForge's [authorization server](#the-authorization-server). A request without a token
+  is told where to sign in; the client opens the browser, the person signs in at the
+  provider and allows the client, and the client receives an access token and a refresh
+  token.
+- **A provider token, for machines.** A service sends an access token the provider issued
+  it for OntoForge's audience, such as by client credentials. OntoForge rejects ID tokens,
+  tokens with an invalid issuer or audience, expired tokens, and tokens without a valid
+  signature from the provider. Without a configured audience, no provider token is
+  accepted.
 
-**First sign-in.** When a previously unknown sign-in identity first signs in, through the
-browser or with a bearer token, OntoForge creates a principal without any roles, except
-for the configured administrator described below. Concurrent first sign-ins for the
-same sign-in identity create only one principal. Later sign-ins resolve the principal by its
-issuer–subject pair. Browser sign-in updates the displayed name, email, and username.
-Status and roles remain unchanged, except for the configured administrator described
-below. Sign-in identities are never linked by email: a different issuer or subject value
+Both kinds of token go in the `Authorization` header using the `Bearer` scheme. When a
+request includes a bearer token, authentication uses that token alone and ignores any
+session cookie. The MCP mounts take bearer tokens only.
+
+**First sign-in.** When a previously unknown sign-in identity first signs in, in any of
+these ways, OntoForge creates a principal without any roles, except for the configured
+administrator described below. Concurrent first sign-ins for the same sign-in identity
+create only one principal. Later sign-ins resolve the principal by its issuer–subject
+pair. Each sign-in at the provider, for the web client or for an authorization, updates
+the displayed name, email, and username. Status and roles remain unchanged, except for
+the configured administrator described below. Sign-in identities are never linked by email: a different issuer or subject value
 identifies a different principal.
 
 **The configured administrator.** The deployment configuration identifies one account
@@ -62,7 +64,8 @@ recovery path if the other administrators are locked out.
 
 **Disabled principals.** Requests to protected resources are rejected when the principal
 is disabled, whether authentication uses a bearer token or a session cookie. Browser
-sign-in does not create a session and reports that the account is disabled. Signing in
+sign-in does not create a session and reports that the account is disabled; an
+authorization ends on a page saying so, and its refresh tokens are refused. Signing in
 does not reactivate the principal, except for the configured administrator described
 above. Disabling an account or resetting its password at the provider does not
 invalidate an existing OntoForge session. Disabling the principal in OntoForge prevents
@@ -71,6 +74,33 @@ further access to protected resources.
 Each authenticated request to a protected resource loads the principal's current status
 and role assignments, regardless of which server handles it. Changes take effect on the
 next such request.
+
+### The authorization server
+
+OntoForge is the OAuth authorization server for clients acting for a person, at the
+server's public address ([ADR 0037](../adr/0037-server-as-authorization-server-for-clients.md)).
+A client signs in with the authorization code flow and PKCE.
+
+- **Clients.** A client whose ID is an https URL publishes its client metadata document
+  there: its name and redirect URIs. MCP clients such as Claude Code connect this way with
+  nothing to configure; the deployment may limit the hosts such documents are fetched
+  from. A tool that cannot publish one is entered in the deployment's configuration.
+  Clients cannot register themselves. Every client is public: it holds no secret. A
+  redirect URI is https, or http on a loopback address, where any port matches.
+- **Resource, no scope.** A client names exactly one resource the token is for, with the
+  `resource` parameter: an MCP mount by its URL, or the REST API as the public address
+  followed by `/api`. A request without one is refused. The client needs no scope: the
+  person's roles decide what the token may do. A token opens only its resource: a REST
+  token is refused on every MCP mount, a mount's token on REST and on every other mount.
+  Clients therefore use the server's public address.
+- **Sign-in and consent.** Every authorization signs the person in at the provider and
+  asks for consent; the provider's own single sign-on usually makes the sign-in quick. The
+  consent page names the client, its client ID, the person, the address the answer goes to
+  and the resource. Deny answers the client `access_denied`.
+- **Tokens.** An access token is opaque and valid for one hour. A refresh token gives a
+  new access and refresh token and is spent by that; presenting a spent one again revokes
+  the whole authorization. An authorization lasts 14 days from consent; then the person
+  authorizes the client again.
 
 ## Roles
 
@@ -121,8 +151,9 @@ as Forbidden, naming the role and, for a Proposer, the way round: stage the writ
 a changeset, or submit the changeset for a Writer to commit.
 
 Unauthenticated callers can access the authentication endpoints, the deployment
-description (`/api/server`), health probes, the API documentation, and MCP resource
-metadata. Protected endpoints reject requests without valid credentials.
+description (`/api/server`), health probes, the API documentation, the authorization
+server, and the resource metadata. Protected endpoints reject requests without valid
+credentials.
 
 ## Ontologies and lenses
 
@@ -180,9 +211,9 @@ Principals are never deleted. Accounts and passwords are managed at the provider
 
 Requests are trusted without authentication or role checks; neither the provider nor
 the access database is required. Lens and ruleset restrictions still apply. Sign-in,
-user-management, and OAuth resource-metadata routes return Not Found rather than allowing
-anonymous access. The `/api/auth/me` endpoint remains available and reports that
-authentication is disabled. The web client hides sign-in, the user menu, and
+user-management, authorization-server and resource-metadata routes return Not Found
+rather than allowing anonymous access. The `/api/auth/me` endpoint remains available and
+reports that authentication is disabled. The web client hides sign-in, the user menu, and
 access-management pages. Existing role assignments are retained for when authentication
 is enabled again. Threads have no principal owner.
 
@@ -190,9 +221,10 @@ is enabled again. Threads have no principal owner.
 
 | | REST | MCP | Web UI |
 |---|---|---|---|
-| Sign in and out, who is signed in | `/api/auth` | OAuth at the provider, discovered from the mount's challenge | the sign-in screen and the user menu |
+| Sign in and out, who is signed in | `/api/auth` for the browser; for other clients the authorization server, discovered from a `401` challenge | the authorization server, discovered from the mount's challenge | the sign-in screen and the user menu |
 | Whether authentication is on | `authentication` in `/api/server/info` and `/api/auth/me` | — | — |
 | User management | `/api/users` and an ontology's `access` | — | the Users page and the Studio's Access page |
 
-[Authentication endpoints](../interfaces/server.md#sign-in).
+[Authentication endpoints](../interfaces/server.md#sign-in),
+[authorization server endpoints](../interfaces/server.md#authorization-server).
 [Role-specific UI controls](../product-surface/README.md#signing-in).

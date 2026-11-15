@@ -272,7 +272,7 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `CHANGESET_MAX_BYTES` | `33554432` (32 MiB) | The most bytes one changeset's staged values hold, document text included (positive integer) |
 | `CHANGESET_MAX_OBJECTS` | `10000` | The most staged objects one changeset holds; a larger import commits in several changesets (positive integer) |
 | `REQUEST_BODY_LIMIT` | `16777216` (16 MiB) | The largest request body the server reads, in bytes, such as a staging request that lists many calls; a larger one answers `413 PAYLOAD_TOO_LARGE` (positive integer) |
-| `PUBLIC_URL` | *(unset)* | The address API and MCP clients reach the server at, reported by `/api/server/info` for client configuration. Required with `AUTH_ENABLED=true`: MCP resources are named after it, so MCP clients connect through it; it must then be `https` unless its host is localhost |
+| `PUBLIC_URL` | *(unset)* | The address API and MCP clients reach the server at, reported by `/api/server/info` for client configuration. Required with `AUTH_ENABLED=true`: it is then the issuer of OntoForge's authorization server and names the resources its tokens are for, so clients connect through it; it must then be `https` unless its host is localhost |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 
@@ -285,18 +285,38 @@ variable below without a default is then required, as is `PUBLIC_URL`; a missing
 unreachable provider or an unusable access database fails the boot. With it off they are
 not read. Every server of one deployment needs the same values.
 
+**At the identity provider**, register one confidential client (`OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET`) for the authorization code flow, with two redirect URIs:
+`WEB_CLIENT_URL/api/auth/callback` for the web client (when `WEB_CLIENT_URL` is set) and
+`PUBLIC_URL/oauth/callback` for OntoForge's authorization server. MCP clients and own
+tools acting for a person sign in at that authorization server, not at the provider, so
+the provider needs nothing for them. For machines, define an audience for OntoForge
+(`OIDC_AUDIENCE`) and one client per service, using client credentials, whose access
+tokens carry that audience; each service's roles are assigned in OntoForge.
+
+**An own tool** acting for a person — a script, command-line tool, desktop app or browser
+extension that cannot publish a client metadata document — is entered in `OAUTH_CLIENTS`.
+It signs in at `PUBLIC_URL` with the authorization code flow and PKCE, needs no scope, and
+must send `resource`: an MCP mount's URL or `PUBLIC_URL/api`.
+[scripts/auth/cli.mjs](scripts/auth/cli.mjs) is the reference
+([usage](scripts/auth/USAGE.md)). What a token opens and how long it lasts:
+[the authorization server](docs/capabilities/authentication.md#the-authorization-server).
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AUTH_ENABLED` | `false` | `true` turns sign-in and role checks on; any other value than `true` or `false` fails the boot |
 | `OIDC_ISSUER` | *(required)* | The provider's issuer URL, exactly as tokens carry it and browsers reach it; it must be `https` unless its host is localhost |
 | `OIDC_BACKCHANNEL_URL` | `OIDC_ISSUER` | Where this server reaches the provider when it cannot reach `OIDC_ISSUER` itself, such as from a container; tokens still name `OIDC_ISSUER` |
-| `OIDC_CLIENT_ID` | *(required)* | The confidential client the server signs browsers in with |
+| `OIDC_CLIENT_ID` | *(required)* | The confidential client the server signs people in with, for the web client and for its authorization server |
 | `OIDC_CLIENT_SECRET` | *(required)* | That client's secret; never in a committed file |
-| `OIDC_AUDIENCE` | *(required)* | The audience an access token must carry for REST and MCP; it must differ from `OIDC_CLIENT_ID` |
+| `OIDC_AUDIENCE` | *(unset)* | The audience a machine's provider token must carry to be accepted on REST and MCP. It must be an audience no client signs people in with: an ID token for it would pass as an API credential, which is why `OIDC_CLIENT_ID` fails the boot. Unset: no provider token is accepted, and only people sign in |
+| `OIDC_SUBJECT_CLAIM` | `sub` | The token claim that names a person or machine at the provider, such as `oid` for Microsoft Entra ID; `AUTH_ADMIN_SUBJECT` and admitted services are named by its value |
 | `WEB_CLIENT_URL` | *(unset)* | The address the browser loads the web client from, which forwards `/api` to this server. Browser sign-in runs there: `/api/auth/callback` under it is the sign-in callback registered at the provider, and a signed-in change must come from it. Unset: no browser sign-in; callers send bearer tokens. It must be `https` unless its host is localhost |
 | `AUTH_ADMIN_SUBJECT` | *(required)* | The subject, at `OIDC_ISSUER`, that is made an active Platform Administrator whenever it signs in |
 | `AUTH_SESSION_IDLE_SECONDS` | `28800` (8 h) | How long a browser session lasts unused; at most 24 hours after sign-in in any case (positive integer) |
 | `ACCESS_DB_URI` | *(required)* | `postgresql://` URL of the access database, which holds users and roles; the server creates it when missing. Its user and password are `DB_USER` and `DB_PASSWORD` unless the URL carries its own |
+| `OAUTH_CLIENTS` | *(unset)* | The authorization server's clients that publish no client metadata document: `client ID\|display name\|redirect URIs`, several separated by `;`, redirect URIs by `,`, such as `ontoforge-cli\|OntoForge CLI\|http://127.0.0.1/callback`. A redirect URI is `https`, or `http` on `localhost`, `127.0.0.1` or `[::1]`, where any port matches; a malformed entry fails the boot |
+| `OAUTH_CLIENT_HOSTS` | *(unset)* | The hosts the authorization server fetches client metadata documents from, comma-separated, such as `claude.ai,chatgpt.com`. Unset: any public `https` host |
 
 ## Optional Features
 

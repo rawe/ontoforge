@@ -1,8 +1,8 @@
 # Server-wide routes
 
-The registry, the server route, sign-in, user management, exposure, probes and
-metrics. Shared conventions — addressing, errors, who may call — are in the
-[interfaces index](README.md).
+The registry, the server route, sign-in, the authorization server, user management,
+exposure, probes and metrics. Shared conventions — addressing, errors, who may call — are
+in the [interfaces index](README.md).
 
 ## Registry
 
@@ -73,14 +73,26 @@ ontology and lens. An assignment whose ontology or lens no longer exists is left
 failed sign-in lands on `/?login=failed`, that of a disabled principal on
 `/?login=disabled`, both without a session.
 
-**MCP clients** discover the provider through the protected-resource metadata
-(RFC 9728): an MCP mount's `401` challenge names `resource_metadata`, the document at
-`/.well-known/oauth-protected-resource` followed by the mount's path, and the scope
-OntoForge's audience comes with. The document names the mount on the server's public
-address as `resource`, the provider as its authorization server, and that scope; the bare
-`/.well-known/oauth-protected-resource` describes the server. A client connects through
-the server's public address, signs in at the provider and sends its access token as a bearer
-header on every request; MCP takes no cookie.
+## Authorization server
+
+With authentication on only, at the server's public address; off, every path here answers
+not found. Semantics:
+[capabilities/authentication.md](../capabilities/authentication.md#the-authorization-server).
+A reference client is `scripts/auth/cli.mjs` ([scripts/auth/](../../scripts/auth/USAGE.md)).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/.well-known/oauth-protected-resource/api` | Protected-resource metadata (RFC 9728) of the REST API: `resource` is the public address followed by `/api`, `authorization_servers` the public address |
+| GET | `/.well-known/oauth-protected-resource/<mount path>` | The same for one MCP mount, its URL as `resource`; the bare `/.well-known/oauth-protected-resource` describes the server |
+| GET | `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414): the issuer, the public address, and its endpoints |
+| GET | `/oauth/authorize` | Authorization request: `response_type=code`, `client_id`, `redirect_uri`, `code_challenge` with `code_challenge_method=S256`, `state`, and exactly one `resource`; any `scope` is ignored |
+| POST | `/oauth/token` | Token request: `grant_type=authorization_code` with the code, the PKCE verifier and the same `resource`, or `grant_type=refresh_token`; no client secret. Answers `access_token`, `refresh_token` and `expires_in` |
+| GET | `/oauth/callback` | Where the provider sends the browser back during an authorization |
+| GET, POST | `/oauth/interaction/{uid}` | The consent page, and its Allow or Deny, accepted only with the public address's `Origin` |
+
+A `401` on a REST route under `/api` or on an MCP mount carries
+`WWW-Authenticate: Bearer resource_metadata="…"`, naming the metadata document of the REST
+API or of that mount. MCP takes no cookie.
 
 ## User management
 

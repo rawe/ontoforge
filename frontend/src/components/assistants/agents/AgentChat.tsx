@@ -1,7 +1,7 @@
 import { Wrench } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import {
-  agentTurns, AssistantChat, type ChatRequest, InsightToggle, ToolCallPanel, ToolCallsSummary, toolLoopParts,
+  agentTurns, AssistantChat, type ChatRequest, InsightToggle, ToolCallPanel, ToolCallsSummary, toolLabel,
 } from '@/assistants'
 import { agentChat } from '@/api/runtime'
 import { EntitiesTabs, type EntitiesTab } from '@/components/assistants/entities/EntitiesTabs'
@@ -29,7 +29,7 @@ interface AgentChatProps {
  * into the side panel, each answer's button shows its own there. In the
  * Workbench the "Show details" switch (remembered, on by default) hides the
  * panel and the buttons; the Studio test panel always shows the panel.
- * Diagnostics: its model calls and the tool calls between them.
+ * Diagnostics: its model calls and the tool calls between them, by tool label.
  */
 export function AgentChat({ ontologyKey, lensKey, agentKey, name, description, blockedReason, remember, picker, actions }: AgentChatProps) {
   const [switchedOn, setSwitchedOn] = useState(() => readString(storageKeys.chatToolCalls) !== 'false')
@@ -63,13 +63,7 @@ export function AgentChat({ ontologyKey, lensKey, agentKey, name, description, b
             }}
           />
         : undefined}
-      diagnostics={{
-        mode: remember ? 'toggle' : 'always',
-        time: (turn, now) => ({
-          parts: toolLoopParts(turn.diagnostics?.modelCalls ?? [], turn.insight, turn.status === 'pending', turn.finishedAt ?? now),
-        }),
-        timeNote: 'Tool calls and the total are timed in the browser, so they are approximate.',
-      }}
+      diagnostics={{ mode: remember ? 'toggle' : 'always', nameOf: toolLabel }}
       insight={{
         panel: showPanel
           ? {

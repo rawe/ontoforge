@@ -11,7 +11,6 @@
  * catalog of its own.
  */
 import { assistantPath, postChat, readAssistantStream, type ChatRequest, type KindReader, type SharedEvent } from '../assistants/stream/chatStream.ts'
-import type { Diagnostics, ModelCall } from '../assistants/diagnostics/diagnostics.ts'
 import { request } from './http.ts'
 import type { Matched, RelationDirection } from './types'
 
@@ -66,7 +65,7 @@ export interface Retriever {
   updatedAt: string
 }
 
-/* ------------------------------- diagnostics ------------------------------- */
+/* ----------------------------------- plan ----------------------------------- */
 
 /** A planned filter: the planner's value and quote, with the filter's definition from the configuration that ran the turn. */
 export interface PlannedFilter extends RetrieverFilter {
@@ -81,29 +80,11 @@ export interface PlanSubQuery {
   mode: SearchMode
   filters: PlannedFilter[]
 }
-export interface RetrieverResult {
-  entityId: string
-  entityType: string
-  label: string | null
-  /** Index into `plan.subQueries`. */
-  subQuery: number
-  matched?: Matched
-  answerFields: Record<string, unknown>
-}
-/** A retriever's model call also carries its bounded texts. */
-export interface RetrieverModelCall extends ModelCall {
-  systemPrompt?: string
-  input?: string
-  output?: string
-  inputTruncated?: boolean
-  outputTruncated?: boolean
-}
-/** What a retriever's `diagnostics` events report about one answer, merged as they arrive: the shared model calls and its own fields. */
-export interface RetrieverDiagnostics extends Diagnostics {
-  modelCalls?: RetrieverModelCall[]
-  searchCalls?: number
-  plan?: { subQueries?: PlanSubQuery[] } & Record<string, unknown>
-  results?: RetrieverResult[]
+/** What a planning step decided — the `plan` of a retriever's `plan` or `replan` step in diagnostics. */
+export interface RetrieverPlan {
+  subQueries: PlanSubQuery[]
+  /** Why the question cannot be answered from the lens; null or absent when it can. */
+  unsupportedReason?: string | null
 }
 /** One exact condition a result is proven to satisfy. */
 export interface RetrieveCondition {
@@ -128,8 +109,8 @@ export interface RetrieveResponse {
   unsupportedReason?: string
 }
 
-/** A retriever's own stream event. */
-export type RetrieverKindEvent = { type: 'retriever.phase'; phase: string; status: 'start' | 'end'; durationMs?: number }
+/** A retriever's own stream event: the phase it starts or ends. */
+export type RetrieverKindEvent = { type: 'retriever.phase'; phase: string; status: 'start' | 'end' }
 
 /** A retriever's turn: the shared events plus its own. */
 export type RetrieverEvent = SharedEvent | RetrieverKindEvent
@@ -182,33 +163,28 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === 'string')
 
-/** The retriever's own fields of a `diagnostics` event; the shared reader checks the rest. */
-function validDiagnostics(event: Record<string, unknown>): boolean {
-  if (event.modelCalls !== undefined && (!Array.isArray(event.modelCalls) || event.modelCalls.some((x) => !record(x) ||
-    ['systemPrompt', 'input', 'output'].some((key) => x[key] !== undefined && typeof x[key] !== 'string') ||
-    ['inputTruncated', 'outputTruncated'].some((key) => x[key] !== undefined && typeof x[key] !== 'boolean')))) return false
-  if (event.plan !== undefined && (!record(event.plan) || (event.plan.subQueries !== undefined && (!Array.isArray(event.plan.subQueries) ||
-    event.plan.subQueries.some((q) => !record(q) || !strings(q.indices) || typeof q.query !== 'string' || (q.relations !== undefined && !strings(q.relations)) || (q.filters !== undefined && !Array.isArray(q.filters))))))) return false
-  if (event.results !== undefined && (!Array.isArray(event.results) || event.results.some((x) => !record(x) ||
-    typeof x.entityId !== 'string' || typeof x.entityType !== 'string' || typeof x.subQuery !== 'number' ||
-    (x.matched !== undefined && !record(x.matched)) || (x.answerFields !== undefined && !record(x.answerFields))))) return false
-  if (event.searchCalls !== undefined && typeof event.searchCalls !== 'number') return false
-  return true
+const validSubQuery = (q: unknown) => record(q) && strings(q.indices) && typeof q.query === 'string' &&
+  strings(q.relations) && strings(q.variants) && typeof q.mode === 'string' &&
+  Array.isArray(q.filters) && q.filters.every((f) => record(f) && typeof f.id === 'string' && typeof f.value === 'string')
+
+/** A step's plan read as a retriever's plan; null when it is not one. */
+export function retrieverPlan(plan: unknown): RetrieverPlan | null {
+  if (!record(plan) || !Array.isArray(plan.subQueries) || !plan.subQueries.every(validSubQuery)) return null
+  if (plan.unsupportedReason !== undefined && plan.unsupportedReason !== null && typeof plan.unsupportedReason !== 'string') return null
+  return plan as unknown as RetrieverPlan
 }
 
-/** The retriever's own events and diagnostics fields, validated before they reach the UI; kind events it does not know are ignored. */
+/** The retriever's own events, validated before they reach the UI; kind events it does not know are ignored. */
 const retrieverReader: KindReader<RetrieverKindEvent> = {
   parse(event) {
     switch (event.type) {
       case 'retriever.phase':
-        if (typeof event.phase === 'string' && ['start', 'end'].includes(String(event.status)) &&
-            (event.durationMs === undefined || typeof event.durationMs === 'number')) return event as RetrieverKindEvent
+        if (typeof event.phase === 'string' && ['start', 'end'].includes(String(event.status))) return event as RetrieverKindEvent
         break
       default: if (typeof event.type === 'string' && event.type.includes('.')) return null
     }
     throw new Error('Invalid event in the retriever stream.')
   },
-  diagnostics: validDiagnostics,
 }
 
 export const readRetrieverStream = (response: Response, onEvent: (event: RetrieverEvent) => void, signal: AbortSignal) =>

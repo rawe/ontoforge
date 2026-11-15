@@ -41,8 +41,6 @@ export interface KindReader<K> {
   parse: (event: Record<string, unknown>) => K | null
   /** Throws when the turn may not end with `final` yet. */
   beforeFinal?: () => void
-  /** Whether the kind's own fields of a `diagnostics` event are well-formed; the reader checks the shared ones. */
-  diagnostics?: (event: Record<string, unknown>) => boolean
 }
 
 /** Read NDJSON events until `consume` reports a terminal one; EOF before that is an interrupted stream. */
@@ -89,7 +87,7 @@ export async function readNdjsonStream(
 /**
  * One assistant turn: `thread` exactly once and first, `delta` text that the
  * `final` reply must match, `entities` whose links join cards of this
- * turn, `diagnostics` checked with the kind's own fields, one terminal
+ * turn, `diagnostics` checked, one terminal
  * `final` or `error`; every other event goes to the
  * kind's reader. Each checked event reaches `onEvent`.
  */
@@ -122,7 +120,7 @@ export async function readAssistantStream<K>(
         event = checkEntities(e, refs)
         break
       case 'diagnostics':
-        event = checkDiagnostics(e, kind.diagnostics)
+        event = checkDiagnostics(e)
         break
       case 'final':
         if (typeof e.reply !== 'string' || (streamed && streamed !== e.reply)) throw new Error('Invalid final answer')

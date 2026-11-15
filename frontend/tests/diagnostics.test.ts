@@ -1,54 +1,38 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  checkDiagnostics, diagnosticsOf, mergeDiagnostics, modelCallTotals, usageParts, type ModelCall,
+  diagnosticsOf, mergeDiagnostics, stepTotals, usageParts, type DiagnosticsStep,
 } from '../src/assistants/diagnostics/diagnostics.ts'
 
-const call = (index: number, extra: Partial<ModelCall> = {}): ModelCall => ({ index, durationMs: 10 * index, ...extra })
+const step = (index: number, extra: Partial<DiagnosticsStep> = {}): DiagnosticsStep => ({ index, startMs: 10 * index, durationMs: 5, ...extra })
 
-test('merge: model calls upsert by index in index order, timings merge by key, limitations dedupe, other fields replace', () => {
-  let d = mergeDiagnostics({}, { modelCalls: [call(2, { name: 'answer' })] })
-  d = mergeDiagnostics(d, { modelCalls: [call(1, { name: 'plan' })], timings: { plan: 5 }, limitations: ['a'], plan: { subQueries: [] } })
-  d = mergeDiagnostics(d, { modelCalls: [call(2, { name: 'answer', failed: true })], timings: { answer: 7, plan: 6 }, limitations: ['a', 'b'], plan: { subQueries: [{}] } })
-  assert.deepEqual(d.modelCalls?.map((c) => [c.index, c.name, c.failed]), [[1, 'plan', undefined], [2, 'answer', true]])
-  assert.deepEqual(d.timings, { plan: 6, answer: 7 })
-  assert.deepEqual(d.limitations, ['a', 'b'])
-  assert.deepEqual(d.plan, { subQueries: [{}] })
-  // An event without a field leaves it as it was.
-  assert.equal(mergeDiagnostics(d, { searchCalls: 2 }).modelCalls, d.modelCalls)
+test('merge: steps upsert by index and stay in index order; the turn\'s time replaces', () => {
+  let d = mergeDiagnostics({}, { steps: [step(2, { name: 'search' })] })
+  d = mergeDiagnostics(d, { steps: [step(1, { model: true })] })
+  d = mergeDiagnostics(d, { steps: [step(2, { name: 'search', failed: true })] })
+  assert.deepEqual(d.steps?.map((s) => [s.index, s.name, s.failed]), [[1, undefined, undefined], [2, 'search', true]])
+  assert.equal(d.durationMs, undefined)
+  d = mergeDiagnostics(d, { durationMs: 40 })
+  d = mergeDiagnostics(d, { durationMs: 41 })
+  assert.equal(d.durationMs, 41)
+  // An event without steps leaves them as they were.
+  assert.equal(mergeDiagnostics(d, { durationMs: 42 }).steps, d.steps)
 })
 
-test('diagnosticsOf drops the event type', () => {
-  assert.deepEqual(diagnosticsOf({ type: 'diagnostics', modelCalls: [call(1)] }), { modelCalls: [call(1)] })
+test('diagnosticsOf keeps the steps and the time, without the event type', () => {
+  assert.deepEqual(diagnosticsOf({ type: 'diagnostics', steps: [step(1)] }), { steps: [step(1)] })
+  assert.deepEqual(diagnosticsOf({ type: 'diagnostics', durationMs: 7 }), { durationMs: 7 })
 })
 
-test('check: the shared fields are checked, the kind checks its own, extra fields pass', () => {
-  const ok = { type: 'diagnostics', modelCalls: [{ index: 1, name: 'understand', durationMs: 4, usage: { input: 900, output: 0 }, finishReason: 'stop' }, { index: 2, durationMs: 0, failed: true }], extra: 1 }
-  assert.equal(checkDiagnostics(ok), ok)
-  for (const bad of [
-    { modelCalls: {} },
-    { modelCalls: [{ durationMs: 1 }] },
-    { modelCalls: [{ index: 0, durationMs: 1 }] },
-    { modelCalls: [{ index: 1.5, durationMs: 1 }] },
-    { modelCalls: [{ index: 1 }] },
-    { modelCalls: [{ index: 1, durationMs: 1, usage: { input: -1 } }] },
-    { modelCalls: [{ index: 1, durationMs: 1, usage: { output: '3' } }] },
-    { modelCalls: [{ index: 1, durationMs: 1, failed: false }] },
-    { modelCalls: [{ index: 1, durationMs: 1, name: 2 }] },
-    { timings: { plan: 'slow' } },
-    { limitations: [1] },
-  ]) assert.throws(() => checkDiagnostics({ type: 'diagnostics', ...bad }), /Invalid diagnostics/, JSON.stringify(bad))
-  assert.throws(() => checkDiagnostics({ type: 'diagnostics', plan: 1 }, (e) => e.plan === undefined), /Invalid diagnostics/)
-})
-
-test('totals: calls, failures, summed duration; each token field summed over the calls that reported it', () => {
-  const totals = modelCallTotals([
-    call(1, { usage: { input: 5210, output: 31, cacheRead: 4800 } }),
-    call(2, { failed: true }),
-    call(3, { usage: { input: 100, output: 0, cacheWrite: 0 } }),
+test('totals: model calls are the model steps, failed counts every failed step, each token field summed over the steps that reported it', () => {
+  const totals = stepTotals([
+    step(1, { model: true, usage: { input: 5210, output: 31, cacheRead: 4800 } }),
+    step(2, { name: 'get_entity', failed: true }),
+    step(3, { model: true, usage: { input: 100, output: 0, cacheWrite: 0 } }),
+    step(4, { model: true, failed: true }),
   ])
-  assert.deepEqual(totals, { calls: 3, failed: 1, durationMs: 60, usage: { input: 5310, output: 31, cacheRead: 4800, cacheWrite: 0 } })
-  assert.deepEqual(modelCallTotals([call(1)]).usage, {})
+  assert.deepEqual(totals, { modelCalls: 3, failed: 2, usage: { input: 5310, output: 31, cacheRead: 4800, cacheWrite: 0 } })
+  assert.deepEqual(stepTotals([step(1, { model: true })]).usage, {})
 })
 
 test('usage parts show only what was reported, a reported 0 included', () => {

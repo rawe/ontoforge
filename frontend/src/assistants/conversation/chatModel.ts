@@ -4,7 +4,7 @@
  * `delta`, `entities`, `diagnostics`, `final`, `error`) build the answer,
  * the entities it met and its diagnostics, and the kind folds its own
  * events into the turn's `insight` (what its side panel shows) through a
- * `TurnModel`. A turn's timing is the client clock.
+ * `TurnModel`.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
@@ -40,19 +40,18 @@ export interface Turn<I> {
   diagnostics?: Diagnostics
   /** Read back from the server's thread, not asked in this view. */
   restored?: boolean
-  /** Client clock (ms) when the question was sent and the turn ended. */
+  /** Client clock (ms) when the question was sent: only the running answer's ticking time reads it. */
   startedAt?: number
-  finishedAt?: number
 }
 
 /** What a kind adds to the shared turn handling. */
 export interface TurnModel<E, I> {
   /** The insight of a new or restored turn. */
   empty: () => I
-  /** One of the kind's own events, at `now`. */
-  apply: (insight: I, event: E, now: number) => I
-  /** The turn ended unfinished at `now` (failed or stopped). */
-  end?: (insight: I, now: number) => I
+  /** One of the kind's own events. */
+  apply: (insight: I, event: E) => I
+  /** The turn ended unfinished (failed or stopped). */
+  end?: (insight: I) => I
   /** Whether the insight has something for the side panel (the turn's entities count too — `hasDetail`). */
   hasInsight: (insight: I) => boolean
   /** The live detail of a running turn: what it is doing right now. */
@@ -92,14 +91,13 @@ function upsert<T>(current: readonly T[], next: readonly T[], key: (item: T) => 
   return result
 }
 
-/** The turn after one stream event at `now`; the kind's events go to its model. */
+/** The turn after one stream event; the kind's events go to its model. */
 export function applyEvent<E extends { type: string }, I>(
   model: TurnModel<E, I>,
   turn: Turn<I>,
   event: SharedEvent | E,
-  now: number,
 ): Turn<I> {
-  if (!isShared(event)) return { ...turn, insight: model.apply(turn.insight, event as E, now) }
+  if (!isShared(event)) return { ...turn, insight: model.apply(turn.insight, event as E) }
   switch (event.type) {
     case 'thread':
       return turn
@@ -112,22 +110,22 @@ export function applyEvent<E extends { type: string }, I>(
         links: upsert(turn.links, event.links, (link) => link.id),
       }
     case 'diagnostics':
-      return { ...turn, diagnostics: mergeDiagnostics(turn.diagnostics ?? {}, diagnosticsOf(event), now) }
+      return { ...turn, diagnostics: mergeDiagnostics(turn.diagnostics ?? {}, diagnosticsOf(event)) }
     case 'final':
-      return { ...turn, reply: event.reply, status: 'complete', finishedAt: now }
+      return { ...turn, reply: event.reply, status: 'complete' }
     case 'error':
-      return failTurn(model, turn, event.error.message, now)
+      return failTurn(model, turn, event.error.message)
   }
 }
 
-/** The turn failed at `now`; its partial answer stays. */
-export function failTurn<E, I>(model: TurnModel<E, I>, turn: Turn<I>, error: string, now: number): Turn<I> {
-  return { ...turn, status: 'failed', error, finishedAt: now, insight: model.end?.(turn.insight, now) ?? turn.insight }
+/** The turn failed; its partial answer stays. */
+export function failTurn<E, I>(model: TurnModel<E, I>, turn: Turn<I>, error: string): Turn<I> {
+  return { ...turn, status: 'failed', error, insight: model.end?.(turn.insight) ?? turn.insight }
 }
 
-/** The user stopped the turn at `now`; its partial answer stays. */
-export function stopTurn<E, I>(model: TurnModel<E, I>, turn: Turn<I>, now: number): Turn<I> {
-  return { ...turn, status: 'failed', stopped: true, finishedAt: now, insight: model.end?.(turn.insight, now) ?? turn.insight }
+/** The user stopped the turn; its partial answer stays. */
+export function stopTurn<E, I>(model: TurnModel<E, I>, turn: Turn<I>): Turn<I> {
+  return { ...turn, status: 'failed', stopped: true, insight: model.end?.(turn.insight) ?? turn.insight }
 }
 
 /** What an ended-unfinished turn says under its answer. */
@@ -172,11 +170,6 @@ export function inspectedTurn<I>(
 ): Turn<I> | undefined {
   const withInsight = turns.filter((t) => hasDetail(t, hasInsight))
   return withInsight.find((t) => t.id === selectedId) ?? withInsight.at(-1)
-}
-
-/** How long the answer took, from sending to its end, in ms. */
-export function turnDuration(turn: Pick<Turn<unknown>, 'startedAt' | 'finishedAt'>): number | undefined {
-  return turn.startedAt !== undefined && turn.finishedAt !== undefined ? turn.finishedAt - turn.startedAt : undefined
 }
 
 /** `412 ms`, `2.4 s`. */

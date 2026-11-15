@@ -94,7 +94,7 @@ export function useAssistantConversation<E extends { type: string }, I>({
         threadId.current = (event as SharedEvent & { type: 'thread' }).threadId
         if (owner !== null) rememberThread(owner, threadId.current)
       }
-      turn = applyEvent(model, turn, event, Date.now())
+      turn = applyEvent(model, turn, event)
       save()
     }
     try {
@@ -119,7 +119,7 @@ export function useAssistantConversation<E extends { type: string }, I>({
         setInput(question)
         return
       }
-      turn = failure === 'stopped' ? stopTurn(model, turn, Date.now()) : failTurn(model, turn, chatErrorText(error), Date.now())
+      turn = failure === 'stopped' ? stopTurn(model, turn) : failTurn(model, turn, chatErrorText(error))
       save()
     } finally {
       if (active.current === controller) active.current = null

@@ -1,93 +1,75 @@
 /**
- * Where an answer's time went, the same for every assistant kind: the kind
- * names its parts in order (model calls, tool calls, steps, phases) and
- * this lays them end to end — each part starts where the one before ended.
- * The strip under an answer draws them as one small bar, the diagnostics
- * drawer as one bar per part. Also the strip's numbers and stepping
- * between the conversation's answers that have diagnostics.
+ * An answer's diagnostics laid out, the same for every assistant kind:
+ * its steps where the server placed them (`startMs`, `durationMs` from the
+ * turn's start), so parallel work overlaps. The strip under an answer draws
+ * them as one small bar beside its numbers, the diagnostics drawer as one
+ * row per step. Also stepping between the conversation's answers that have
+ * diagnostics.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
-import { formatDuration, turnDuration, type Turn } from '../conversation/chatModel.ts'
-import { modelCallTotals, type Diagnostics } from './diagnostics.ts'
+import { formatDuration, type Turn } from '../conversation/chatModel.ts'
+import { stepTotals, usageParts, type Diagnostics, type DiagnosticsStep } from './diagnostics.ts'
 
-/** A model call, or other work (tools, search, a walk). */
-export type PartKind = 'model' | 'work'
+/** A model call, other work, or the time a running answer has spent since its last finished step. */
+export type Tone = 'model' | 'work' | 'running'
 
-/**
- * `done`, `failed` and `running` took time; `skipped`, `stopped`, `not-run`
- * and `waiting` (not started yet) took none and show only in the drawer.
- */
-export type PartState = 'done' | 'failed' | 'running' | 'skipped' | 'stopped' | 'not-run' | 'waiting'
+const toneOf = (step: DiagnosticsStep): Tone => (step.model === true ? 'model' : 'work')
 
-/** One part as the kind names it. */
-export interface PartInput {
-  key: string
-  label: string
-  kind: PartKind
-  state: PartState
-  /** Omitted for the running part: it gets the time the others leave of the elapsed time. */
-  durationMs?: number
-  /** One line under the label (the tools of a group). */
-  detail?: string
-}
-
-/** One part laid out. */
-export interface TimePart extends PartInput {
-  durationMs: number
-  /** Where it starts: the sum of the timed parts before it. */
-  offsetMs: number
-}
-
-export interface Timeline {
-  parts: TimePart[]
-  /** The sum of the timed parts. */
-  totalMs: number
-}
-
-const TIMED: ReadonlySet<PartState> = new Set(['done', 'failed', 'running'])
-
-/** Whether the part took time (and is drawn in the strip's bar). */
-export const isTimed = (part: Pick<PartInput, 'state'>) => TIMED.has(part.state)
+/** Where the steps end: the latest end, in ms since the turn began; 0 without steps. */
+export const stepsEnd = (steps: readonly DiagnosticsStep[]) =>
+  steps.reduce((end, step) => Math.max(end, step.startMs + step.durationMs), 0)
 
 /**
- * The parts laid out end to end. While the answer runs (`elapsedMs` given),
- * the running part without a duration gets what the elapsed time leaves;
- * without one, a "Working" part at the end does — so the bar grows.
+ * The answer's time: elapsed by the client's clock while it runs (the one
+ * number that ticks), else the turn's time the server reported, else — when
+ * the turn ended before the server sent it — where its last step ended.
  */
-export function timeline(input: readonly PartInput[], elapsedMs?: number): Timeline {
-  const known = input.reduce((sum, part) => sum + (isTimed(part) ? part.durationMs ?? 0 : 0), 0)
-  const rest = elapsedMs === undefined ? 0 : Math.max(0, elapsedMs - known)
-  const open = input.findIndex((part) => part.state === 'running' && part.durationMs === undefined)
-  const all: PartInput[] = elapsedMs !== undefined && open === -1
-    ? [...input, { key: 'working', label: 'Working', kind: 'work', state: 'running', durationMs: rest }]
-    : [...input]
-  let offset = 0
-  const parts = all.map((part, i): TimePart => {
-    const durationMs = !isTimed(part) ? 0 : i === open ? (part.durationMs ?? rest) : part.durationMs ?? 0
-    const laid = { ...part, durationMs, offsetMs: offset }
-    offset += durationMs
-    return laid
-  })
-  return { parts, totalMs: offset }
+export function answerTime(turn: Pick<Turn<unknown>, 'status' | 'startedAt' | 'diagnostics'>, now: number): number {
+  if (turn.status === 'pending' && turn.startedAt !== undefined) return Math.max(0, now - turn.startedAt)
+  return turn.diagnostics?.durationMs ?? stepsEnd(turn.diagnostics?.steps ?? [])
 }
 
-/** One segment of the strip's bar: a timed part and its share (0–1) of the bar. */
+/** One segment of the strip's bar and its share (0–1) of the bar. */
 export interface Segment {
   key: string
-  kind: PartKind
-  state: PartState
+  tone: Tone
+  failed: boolean
   share: number
 }
 
-/** The strip's bar: every timed part in order, none left out; with no time at all, equal shares. */
-export function segments(time: Timeline): Segment[] {
-  const timed = time.parts.filter(isTimed)
-  return timed.map((part) => ({
-    key: part.key,
-    kind: part.kind,
-    state: part.state,
-    share: time.totalMs > 0 ? part.durationMs / time.totalMs : 1 / timed.length,
+/**
+ * The strip's bar: the steps in the order they started, every one of them
+ * in it. Steps that ran at the same time (parallel tool calls) share one
+ * segment that spans them. While the answer runs (`elapsedMs` given), a
+ * running segment at the end stands for the time since the last step
+ * ended. Each segment's share is of the time the segments cover; with no
+ * time at all, the shares are equal.
+ */
+export function stripSegments(steps: readonly DiagnosticsStep[], elapsedMs?: number): Segment[] {
+  const ordered = [...steps].sort((a, b) => a.startMs - b.startMs || a.index - b.index)
+  const groups: { key: string; tone: Tone; failed: boolean; start: number; end: number }[] = []
+  for (const step of ordered) {
+    const end = step.startMs + step.durationMs
+    const last = groups.at(-1)
+    if (last !== undefined && step.startMs < last.end) {
+      last.end = Math.max(last.end, end)
+      if (step.model === true) last.tone = 'model'
+      last.failed ||= step.failed === true
+    } else {
+      groups.push({ key: `step-${step.index}`, tone: toneOf(step), failed: step.failed === true, start: step.startMs, end })
+    }
+  }
+  if (elapsedMs !== undefined) {
+    const end = stepsEnd(steps)
+    groups.push({ key: 'running', tone: 'running', failed: false, start: end, end: Math.max(end, elapsedMs) })
+  }
+  const covered = groups.reduce((sum, group) => sum + group.end - group.start, 0)
+  return groups.map((group) => ({
+    key: group.key,
+    tone: group.tone,
+    failed: group.failed,
+    share: covered > 0 ? (group.end - group.start) / covered : 1 / groups.length,
   }))
 }
 
@@ -101,41 +83,83 @@ const SEGMENT_ROOM_PX = 6
 
 /**
  * The bar's width in px: 64, wider with more segments so a model call
- * still reads as longer than the tool call beside it, and at most 240 so
- * the numbers beside it stay readable. Past that, and where the strip has
- * less room, every segment narrows alike (`TimeBar`).
+ * still reads as longer than the tool call beside it, and at most 240.
+ * Past that, and where the strip has less room, every segment narrows
+ * alike (`TimeBar`).
  */
 export const barWidth = (count: number) =>
   Math.min(BAR_MAX_PX, Math.max(BAR_MIN_PX, count * SEGMENT_ROOM_PX))
 
-/** The answer's time: elapsed while it runs, else the kind's reported total, the client's, or the parts' sum. */
-export function answerTime(
-  turn: Pick<Turn<unknown>, 'status' | 'startedAt' | 'finishedAt'>,
-  reportedMs: number | undefined,
-  partsMs: number,
-  now: number,
-): number {
-  if (turn.status === 'pending' && turn.startedAt !== undefined) return Math.max(0, now - turn.startedAt)
-  return reportedMs ?? turnDuration(turn) ?? partsMs
+/** A step's readable name: the kind's label for its name; a model step without one is a model call. */
+export const stepName = (step: Pick<DiagnosticsStep, 'name'>, nameOf?: (name: string) => string) =>
+  step.name === undefined ? 'Model call' : nameOf?.(step.name) ?? step.name
+
+/** One row of the drawer's list. */
+export interface StepRow {
+  key: string
+  /** The step's index; absent on the running row. */
+  index?: number
+  label: string
+  tone: Tone
+  failed: boolean
+  durationMs: number
+  /** Where its bar starts and how wide it is, in % of the answer's time. */
+  left: number
+  width: number
+  /** A model step's tokens as reported and its finish reason. */
+  facts: string[]
+  plan?: Record<string, unknown>
+}
+
+/**
+ * The drawer's list: one row per step in index order, its bar at its real
+ * start on a scale of the answer's time (`timeMs`, or the steps' end when
+ * they reach further). While the answer runs (`elapsedMs` given), a last
+ * row runs from the end of the steps to now.
+ */
+export function stepRows(
+  steps: readonly DiagnosticsStep[],
+  timeMs: number,
+  nameOf?: (name: string) => string,
+  elapsedMs?: number,
+): StepRow[] {
+  const end = stepsEnd(steps)
+  const scale = Math.max(timeMs, end, elapsedMs ?? 0)
+  const at = (ms: number) => (scale > 0 ? (ms / scale) * 100 : 0)
+  const rows = steps.map((step): StepRow => ({
+    key: `step-${step.index}`,
+    index: step.index,
+    label: stepName(step, nameOf),
+    tone: toneOf(step),
+    failed: step.failed === true,
+    durationMs: step.durationMs,
+    left: at(step.startMs),
+    width: scale > 0 ? at(step.durationMs) : 100,
+    facts: [...usageParts(step.usage), ...(step.finishReason !== undefined ? [`finish: ${step.finishReason}`] : [])],
+    ...(step.plan !== undefined && { plan: step.plan }),
+  }))
+  if (elapsedMs === undefined) return rows
+  const rest = Math.max(0, scale - end)
+  return [...rows, { key: 'running', label: 'Running', tone: 'running', failed: false, durationMs: rest, left: at(end), width: at(rest), facts: [] }]
 }
 
 /** The strip's numbers. */
 export interface StripFacts {
   timeMs: number
   running: boolean
-  calls: number
+  modelCalls: number
   failed: number
   /** Input plus output tokens, as far as reported; absent when none were. */
   tokens?: number
 }
 
 export function stripFacts(diagnostics: Diagnostics, timeMs: number, running: boolean): StripFacts {
-  const totals = modelCallTotals(diagnostics.modelCalls ?? [])
+  const totals = stepTotals(diagnostics.steps ?? [])
   const { input, output } = totals.usage
   return {
     timeMs,
     running,
-    calls: totals.calls,
+    modelCalls: totals.modelCalls,
     failed: totals.failed,
     ...(input !== undefined || output !== undefined ? { tokens: (input ?? 0) + (output ?? 0) } : {}),
   }
@@ -143,16 +167,22 @@ export function stripFacts(diagnostics: Diagnostics, timeMs: number, running: bo
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 
+/** `4.4 s` or `3.2 s so far`. */
+export const timeText = (facts: Pick<StripFacts, 'timeMs' | 'running'>) => `${formatDuration(facts.timeMs)}${facts.running ? ' so far' : ''}`
+
+/** `1 model call`, `2 model calls`. */
+export const modelCallsText = (n: number) => plural(n, 'model call', 'model calls')
+
 /** `4.4 s · 2 model calls · 10,840 tokens` — what the strip says beside its bar. */
 export function stripText(facts: StripFacts): string {
   return [
-    `${formatDuration(facts.timeMs)}${facts.running ? ' so far' : ''}`,
-    plural(facts.calls, 'model call', 'model calls'),
+    timeText(facts),
+    modelCallsText(facts.modelCalls),
     ...(facts.tokens !== undefined ? [plural(facts.tokens, 'token', 'tokens')] : []),
   ].join(' · ')
 }
 
-/** `1 failed`, or null when no call failed. */
+/** `1 failed`, or null when no step failed. */
 export const failedText = (facts: StripFacts) => (facts.failed > 0 ? `${facts.failed} failed` : null)
 
 /** The strip button's accessible name: what it shows, and what it does. */
@@ -161,21 +191,17 @@ export function stripLabel(facts: StripFacts): string {
   return `Diagnostics: ${stripText(facts)}${failed !== null ? ` · ${failed}` : ''}. Open the details.`
 }
 
-/** What a kind reports about an answer's time: its parts in order, and its own total where it measures one. */
-export interface AnswerTime {
-  parts: PartInput[]
-  totalMs?: number
-}
-
-/** An answer's time laid out and the strip's numbers, at `now` (which matters only while it runs). */
+/** The strip's numbers and bar for an answer at `now` (which matters only while it runs). */
 export function answerSummary(
-  turn: Pick<Turn<unknown>, 'status' | 'startedAt' | 'finishedAt' | 'diagnostics'>,
-  given: AnswerTime,
+  turn: Pick<Turn<unknown>, 'status' | 'startedAt' | 'diagnostics'>,
   now: number,
-): { time: Timeline; facts: StripFacts } {
+): { facts: StripFacts; segments: Segment[] } {
   const running = turn.status === 'pending'
-  const time = timeline(given.parts, running && turn.startedAt !== undefined ? Math.max(0, now - turn.startedAt) : undefined)
-  return { time, facts: stripFacts(turn.diagnostics ?? {}, answerTime(turn, given.totalMs, time.totalMs, now), running) }
+  const timeMs = answerTime(turn, now)
+  return {
+    facts: stripFacts(turn.diagnostics ?? {}, timeMs, running),
+    segments: stripSegments(turn.diagnostics?.steps ?? [], running ? timeMs : undefined),
+  }
 }
 
 /** The conversation's answers that have diagnostics, in order. */

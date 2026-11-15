@@ -1,19 +1,12 @@
 /**
  * Pure turn handling of every graph assistant kind: its events fold into
- * one answer's insight — the pipeline, each step's runs, the summary. The
+ * one answer's insight — the pipeline and each step's runs. The
  * entities it met are the turn's own (`chatModel.ts`).
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
-import {
-  isGraphEvent,
-  type GraphEvent,
-  type GraphSummary,
-  type GraphTopology,
-  type StepStatus,
-} from '../../../api/graphEvents.ts'
+import { isGraphEvent, type GraphEvent, type GraphTopology, type StepStatus } from '../../../api/graphEvents.ts'
 import type { TurnModel } from '../../../assistants/conversation/chatModel.ts'
-import type { PartInput, PartState } from '../../../assistants/diagnostics/timeline.ts'
 
 /** A run that was still going when the turn failed or was stopped. */
 export type RunStatus = StepStatus | 'interrupted'
@@ -24,7 +17,6 @@ export interface StepRun {
   round: number
   status: RunStatus
   summary?: string
-  durationMs?: number
 }
 
 /** What a graph kind reported about one answer. */
@@ -33,17 +25,15 @@ export interface GraphInsight {
   graph: GraphTopology | null
   /** Every run, by step id + round, in the order they started. */
   steps: StepRun[]
-  summary: GraphSummary | null
 }
 
-function applyStep(steps: readonly StepRun[], event: { id: string; status: StepStatus; round?: number; summary?: string; durationMs?: number }): StepRun[] {
+function applyStep(steps: readonly StepRun[], event: { id: string; status: StepStatus; round?: number; summary?: string }): StepRun[] {
   const round = event.round ?? 1
   const i = steps.findIndex((s) => s.id === event.id && s.round === round)
   const run: StepRun = {
     ...(i === -1 ? { id: event.id, round } : steps[i]),
     status: event.status,
     ...(event.summary !== undefined && { summary: event.summary }),
-    ...(event.durationMs !== undefined && { durationMs: event.durationMs }),
   }
   return i === -1 ? [...steps, run] : steps.map((s, j) => (j === i ? run : s))
 }
@@ -54,11 +44,10 @@ export const stepLabel = (insight: Pick<GraphInsight, 'graph'>, id: string) =>
 
 /** How every graph kind's events build an answer's insight. */
 export const graphTurns: TurnModel<GraphEvent, GraphInsight> = {
-  empty: () => ({ graph: null, steps: [], summary: null }),
+  empty: () => ({ graph: null, steps: [] }),
   apply(insight, event) {
     if (isGraphEvent(event, 'graph')) return { ...insight, graph: { steps: event.steps, edges: event.edges } }
     if (isGraphEvent(event, 'step')) return { ...insight, steps: applyStep(insight.steps, event) }
-    if (isGraphEvent(event, 'summary')) return { ...insight, summary: event }
     return insight
   },
   end: (insight) => ({
@@ -77,28 +66,4 @@ export const graphTurns: TurnModel<GraphEvent, GraphInsight> = {
 export function stepState(insight: Pick<GraphInsight, 'steps'>, id: string, ended: boolean): RunStatus | 'waiting' | 'not-run' {
   const runs = insight.steps.filter((s) => s.id === id)
   return runs.at(-1)?.status ?? (ended ? 'not-run' : 'waiting')
-}
-
-const RUN_STATE: Record<RunStatus, PartState> = {
-  running: 'running', done: 'done', failed: 'failed', skipped: 'skipped', interrupted: 'stopped',
-}
-
-/**
- * Where a graph answer's time went: each run of a step in the order they
- * started, a repeated step once per round, a model step as a model call.
- * The running step gets the time still unaccounted for; a skipped step
- * took none.
- */
-export function graphParts(insight: Pick<GraphInsight, 'graph' | 'steps'>): PartInput[] {
-  return insight.steps.map((run): PartInput => {
-    const rounds = insight.steps.filter((s) => s.id === run.id).length
-    const state = RUN_STATE[run.status]
-    return {
-      key: `${run.id}-${run.round}`,
-      label: rounds > 1 ? `${stepLabel(insight, run.id)} · round ${run.round}` : stepLabel(insight, run.id),
-      kind: insight.graph?.steps.find((s) => s.id === run.id)?.model === true ? 'model' : 'work',
-      state,
-      ...(run.durationMs !== undefined ? { durationMs: run.durationMs } : state === 'running' ? {} : { durationMs: 0 }),
-    }
-  })
 }

@@ -157,7 +157,7 @@ export function AssistantChat<E extends { type: string }, I>({
     <div className={cn(toggle !== undefined && 'border-l pl-3')}>
       <InsightToggle
         label="Show diagnostics"
-        title="Ask for each answer's diagnostics (where its time went, its model calls with tokens, and what the kind reports besides) and show them under the answer"
+        title="Ask for each answer's diagnostics (how long each step took and the tokens each model call used) and show them under the answer"
         checked={gate.on}
         onChange={(on) => {
           gate.setOn(on)
@@ -213,7 +213,6 @@ export function AssistantChat<E extends { type: string }, I>({
                         diagnostics={diagnosing && turn.diagnostics !== undefined && (
                           <DiagnosticsStrip
                             turn={turn}
-                            slot={diagnostics}
                             open={drawer.open && drawerShown?.id === turn.id}
                             onOpen={() => setDrawer((current) =>
                               current.open && drawerShown?.id === turn.id ? { ...current, open: false } : { open: true, id: turn.id })}

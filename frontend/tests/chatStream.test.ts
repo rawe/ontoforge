@@ -50,7 +50,7 @@ for (const [name, body] of [
   ['no thread first', '{"type":"final","reply":"x"}\n'],
   ['a second thread', THREAD + THREAD + '{"type":"final","reply":"x"}\n'],
   ['an unknown shared event', THREAD + '{"type":"tool_call","callId":"1","tool":"search","args":{}}\n'],
-  ['malformed diagnostics', THREAD + '{"type":"diagnostics","modelCalls":[{"index":1}]}\n{"type":"final","reply":"x"}\n'],
+  ['malformed diagnostics', THREAD + '{"type":"diagnostics","steps":[{"index":1}]}\n{"type":"final","reply":"x"}\n'],
 ]) {
   test(name, async () => {
     await assert.rejects(readChatStream(response([new TextEncoder().encode(body)]), () => {}))
@@ -227,22 +227,38 @@ test('thread refusals and refused questions read from the error details', () => 
   assert.equal(chatErrorText('nope', 'Fallback'), 'Fallback')
 })
 
-test('diagnostics are a shared event: checked by the reader, the kind checks its own fields', async () => {
+test('diagnostics are a shared event, checked by the reader: one step each, then the turn\'s time', async () => {
   const events = [
     { type: 'thread', threadId: 't1' },
-    { type: 'diagnostics', modelCalls: [{ index: 1, durationMs: 0, usage: { input: 5210, output: 31, cacheRead: 4800 }, finishReason: 'tool_use' }] },
+    { type: 'diagnostics', steps: [{ index: 1, model: true, startMs: 12, durationMs: 1, usage: { input: 5210, output: 31, cacheRead: 4800 }, finishReason: 'tool_use' }] },
     { type: 'agent.tool_call', callId: '1', tool: 'search', args: {} },
+    { type: 'diagnostics', steps: [{ index: 2, name: 'search', startMs: 16, durationMs: 22 }] },
     { type: 'agent.tool_result', callId: '1', result: [] },
-    { type: 'diagnostics', modelCalls: [{ index: 2, durationMs: 0, failed: true }] },
+    { type: 'diagnostics', steps: [{ index: 3, model: true, startMs: 38, durationMs: 0, failed: true }] },
+    { type: 'diagnostics', durationMs: 41 },
     { type: 'final', reply: 'Done.' },
   ]
   const received: unknown[] = []
   await readChatStream(response([new TextEncoder().encode(events.map((e) => JSON.stringify(e)).join('\n'))]), (e) => received.push(e))
   assert.deepEqual(received, events)
-  const own = { parse: () => null, diagnostics: (e: Record<string, unknown>) => e.plan === undefined || typeof e.plan === 'object' }
+  const own = { parse: () => null }
   const body = (event: object) => response([new TextEncoder().encode([{ type: 'thread', threadId: 't1' }, event, { type: 'final', reply: '' }].map((e) => JSON.stringify(e)).join('\n'))])
-  await readAssistantStream(body({ type: 'diagnostics', plan: {} }), own, () => {})
-  await assert.rejects(readAssistantStream(body({ type: 'diagnostics', plan: 1 }), own, () => {}), /Invalid diagnostics/)
+  await readAssistantStream(body({ type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 0, durationMs: 3, plan: { subQueries: [] } }] }), own, () => {})
+  for (const bad of [
+    { steps: {} },
+    { steps: [{ index: 0, startMs: 0, durationMs: 1 }] },
+    { steps: [{ index: 1.5, startMs: 0, durationMs: 1 }] },
+    { steps: [{ index: 1, durationMs: 1 }] },
+    { steps: [{ index: 1, startMs: 0 }] },
+    { steps: [{ index: 1, startMs: -1, durationMs: 1 }] },
+    { steps: [{ index: 1, startMs: 0, durationMs: 1, model: false }] },
+    { steps: [{ index: 1, startMs: 0, durationMs: 1, name: 2 }] },
+    { steps: [{ index: 1, startMs: 0, durationMs: 1, usage: { input: -1 } }] },
+    { steps: [{ index: 1, startMs: 0, durationMs: 1, usage: { output: '3' } }] },
+    { steps: [{ index: 1, startMs: 0, durationMs: 1, failed: false }] },
+    { steps: [{ index: 1, startMs: 0, durationMs: 1, plan: 'all' }] },
+    { durationMs: 'slow' },
+  ]) await assert.rejects(readAssistantStream(body({ type: 'diagnostics', ...bad }), own, () => {}), /Invalid diagnostics/, JSON.stringify(bad))
 })
 
 test('the chat request carries diagnostics when asked', async () => {

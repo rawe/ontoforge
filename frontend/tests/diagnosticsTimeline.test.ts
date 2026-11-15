@@ -1,231 +1,202 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { applyEvent, pendingTurn, type Turn } from '../src/assistants/conversation/chatModel.ts'
-import { mergeDiagnostics, type ModelCall } from '../src/assistants/diagnostics/diagnostics.ts'
+import type { Diagnostics, DiagnosticsStep } from '../src/assistants/diagnostics/diagnostics.ts'
 import {
-  SEGMENT_GAP_PX, SEGMENT_MIN_PX, answerSummary, answerTime, barWidth, diagnosedTurns, drawerTurn, segments, stepping, stripFacts, stripLabel, stripText, timeline,
+  SEGMENT_GAP_PX, SEGMENT_MIN_PX, answerSummary, answerTime, barWidth, diagnosedTurns, drawerTurn, stepName, stepRows, stepping, stepsEnd,
+  stripFacts, stripLabel, stripSegments, stripText,
 } from '../src/assistants/diagnostics/timeline.ts'
-import { agentTurns, toolLoopParts } from '../src/assistants/steps/toolCallModel.ts'
-import { graphParts, graphTurns, type GraphInsight } from '../src/components/assistants/graph/graphTurnModel.ts'
-import { retrieverParts, retrieverTurns } from '../src/components/assistants/retrievers/retrieverModel.ts'
-import type { ToolCall } from '../src/api/types.ts'
+import { agentTurns, toolLabel } from '../src/assistants/steps/toolCallModel.ts'
+import { graphTurns, stepLabel } from '../src/components/assistants/graph/graphTurnModel.ts'
 
-const model = (index: number, durationMs: number, arrivedAt: number, extra: Partial<ModelCall> = {}): ModelCall => ({ index, durationMs, arrivedAt, ...extra })
-const tool = (callId: string, startedAt: number, finishedAt?: number, name = 'search'): ToolCall => ({
-  callId, tool: name, args: {}, startedAt, ...(finishedAt === undefined ? { status: 'pending' } : { status: 'completed', finishedAt }),
-})
+const model = (index: number, startMs: number, durationMs: number, extra: Partial<DiagnosticsStep> = {}): DiagnosticsStep =>
+  ({ index, model: true, startMs, durationMs, ...extra })
+const work = (index: number, name: string, startMs: number, durationMs: number, extra: Partial<DiagnosticsStep> = {}): DiagnosticsStep =>
+  ({ index, name, startMs, durationMs, ...extra })
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0)
 const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} ≈ ${expected}`)
+const ended = (diagnostics: Diagnostics, status: Turn<unknown>['status'] = 'complete') => ({ status, diagnostics })
 
-/* ------------------------------ arrival stamps ------------------------------ */
+/* ------------------------------- one to many -------------------------------- */
 
-test('a model call keeps when its entry first arrived; a later update does not move it', () => {
-  let d = mergeDiagnostics({}, { modelCalls: [{ index: 1, durationMs: 5 }] }, 100)
-  d = mergeDiagnostics(d, { modelCalls: [{ index: 1, durationMs: 6 }, { index: 2, durationMs: 7 }] }, 200)
-  assert.deepEqual(d.modelCalls, [{ index: 1, durationMs: 6, arrivedAt: 100 }, { index: 2, durationMs: 7, arrivedAt: 200 }])
-  // Without a clock nothing is stamped.
-  assert.deepEqual(mergeDiagnostics({}, { modelCalls: [{ index: 1, durationMs: 5 }] }).modelCalls, [{ index: 1, durationMs: 5 }])
+test('one model call: one segment, the whole bar; one row over the whole answer', () => {
+  const turn = ended({ steps: [model(1, 0, 1800, { usage: { input: 5210, output: 96 }, finishReason: 'stop' })], durationMs: 1800 })
+  const { facts, segments } = answerSummary(turn, 0)
+  assert.deepEqual(segments, [{ key: 'step-1', tone: 'model', failed: false, share: 1 }])
+  assert.equal(barWidth(segments.length), 64)
+  assert.equal(stripText(facts), '1.8 s · 1 model call · 5,306 tokens')
+  const rows = stepRows(turn.diagnostics.steps!, 1800)
+  assert.deepEqual(rows.map((r) => [r.index, r.label, r.tone, r.left, r.width, r.facts]), [[1, 'Model call', 'model', 0, 100, ['5,210 in', '96 out', 'finish: stop']]])
 })
 
-test('a turn that asks for diagnostics has them from the start; one that does not has none', () => {
-  assert.deepEqual(pendingTurn('a', 'q', [], 0, true).diagnostics, {})
-  assert.equal(pendingTurn('a', 'q', [], 0).diagnostics, undefined)
-})
-
-/* ---------------------------------- agent ----------------------------------- */
-
-test('agent, one model call: one model part, the whole bar', () => {
-  const parts = toolLoopParts([model(1, 1800, 1900)], [], false, 2000)
-  assert.deepEqual(parts, [{ key: 'model-1', label: 'Model call 1', kind: 'model', state: 'done', durationMs: 1800 }])
-  const time = timeline(parts)
-  assert.equal(time.totalMs, 1800)
-  assert.deepEqual(segments(time), [{ key: 'model-1', kind: 'model', state: 'done', share: 1 }])
-  assert.equal(barWidth(1), 64)
-})
-
-test('agent, twenty model calls with tool calls between them, some parallel: every part in order, none dropped', () => {
-  // Call k arrives at 1000k; after each but the last, tools start 10 ms later.
-  // After call 3, three tools run in parallel (100–400, 150–250, 120–500 ms after it).
-  const calls = Array.from({ length: 20 }, (_, i) => model(i + 1, 600, 1000 * (i + 1)))
-  const tools: ToolCall[] = []
-  for (let k = 1; k < 20; k++) {
-    if (k === 3) tools.push(tool('p1', 3100, 3400, 'search'), tool('p2', 3150, 3250, 'get_entity'), tool('p3', 3120, 3500, 'search'))
-    else tools.push(tool(`t${k}`, 1000 * k + 10, 1000 * k + 210, 'get_neighbors'))
+/**
+ * Twenty model calls with tool calls between them; after the third, three
+ * tool calls run in parallel: 41 steps.
+ */
+function longRun(): DiagnosticsStep[] {
+  const steps: DiagnosticsStep[] = []
+  let t = 0
+  for (let k = 1; k <= 20; k++) {
+    steps.push(model(steps.length + 1, t, 600))
+    t += 600
+    if (k === 20) break
+    const durations = k === 3 ? [300, 100, 380] : [200]
+    for (const ms of durations) steps.push(work(steps.length + 1, k === 3 && ms === 100 ? 'get_entity' : 'search', t + 5, ms))
+    t += 5 + Math.max(...durations) + 5
   }
-  const parts = toolLoopParts(calls, tools, false, 21000)
-  assert.equal(parts.length, 39)
-  assert.deepEqual(parts.slice(0, 7).map((p) => p.label), [
-    'Model call 1', 'Get neighbours', 'Model call 2', 'Get neighbours', 'Model call 3', '3 tool calls', 'Model call 4',
-  ])
-  assert.equal(parts.at(-1)!.label, 'Model call 20')
-  // The parallel group: from the first start to the last end, its tools named once each.
-  const group = parts[5]!
-  assert.equal(group.durationMs, 400)
-  assert.equal(group.detail, 'Search, Get entity')
-  assert.equal(group.kind, 'work')
+  return steps
+}
 
-  const time = timeline(parts)
-  assert.equal(time.totalMs, 20 * 600 + 18 * 200 + 400)
-  // Each part starts where the one before ended.
-  time.parts.forEach((part, i) => assert.equal(part.offsetMs, i === 0 ? 0 : time.parts[i - 1]!.offsetMs + time.parts[i - 1]!.durationMs))
-  const bar = segments(time)
+test('twenty model calls with tool calls between them, three in parallel: the strip has every step in order, parallel ones in one segment; the drawer has a row each, overlapping where they ran together', () => {
+  const steps = longRun()
+  assert.equal(steps.length, 41)
+  const total = stepsEnd(steps) + 10
+  const bar = stripSegments(steps)
+  // 41 steps, the three parallel ones in one segment.
   assert.equal(bar.length, 39)
+  assert.equal(bar.filter((s) => s.tone === 'model').length, 20)
   close(sum(bar.map((s) => s.share)), 1)
-  assert.deepEqual(bar.filter((s) => s.kind === 'model').length, 20)
-  // The bar has room for every segment at its least width, with the gaps,
-  // and never grows past its most width, however many calls an answer made.
+  const parallel = bar[5]!
+  assert.equal(parallel.tone, 'work')
+  close(parallel.share, 380 / (20 * 600 + 18 * 200 + 380))
+  // The bar has room for every segment at its least width, with the gaps, and never grows past its most width.
   assert.ok(barWidth(bar.length) >= bar.length * SEGMENT_MIN_PX + (bar.length - 1) * SEGMENT_GAP_PX)
   assert.equal(barWidth(17), 102)
   assert.equal(barWidth(99), 240)
+
+  const rows = stepRows(steps, total, toolLabel)
+  assert.equal(rows.length, 41)
+  assert.deepEqual(rows.map((r) => r.index), steps.map((s) => s.index))
+  assert.deepEqual(rows.slice(4, 9).map((r) => r.label), ['Model call', 'Search', 'Get entity', 'Search', 'Model call'])
+  // Each bar sits at its real start; the parallel three start together.
+  rows.forEach((row, i) => close(row.left, (steps[i]!.startMs / total) * 100))
+  assert.equal(new Set(rows.slice(5, 8).map((r) => r.left)).size, 1)
+  assert.equal(stripText(stripFacts({ steps, durationMs: total }, total, false)), `${(total / 1000).toFixed(1)} s · 20 model calls`)
 })
 
-test('agent, running: a running tool group grows to now; with no tool running, the next model call runs', () => {
-  // Call 1 arrived at 1500 (took 1400), two tools started, one still running at 2600.
-  const calls = [model(1, 1400, 1500)]
-  const running = toolLoopParts(calls, [tool('a', 1510, 1700), tool('b', 1520)], true, 2600)
-  assert.deepEqual(running.map((p) => [p.label, p.state, p.durationMs]), [['Model call 1', 'done', 1400], ['2 tool calls', 'running', 1090]])
-  // The tools ended; model call 2 is under way and gets the time not yet accounted for.
-  const thinking = toolLoopParts(calls, [tool('a', 1510, 1700), tool('b', 1520, 1900)], true, 3000)
-  assert.deepEqual(thinking.at(-1), { key: 'model-2', label: 'Model call 2', kind: 'model', state: 'running' })
-  const time = timeline(thinking, 3000 - 0)
-  assert.equal(time.parts.at(-1)!.durationMs, 3000 - 1400 - 390)
-  assert.equal(time.totalMs, 3000)
-  // Before any model call arrived: model call 1 runs.
-  assert.deepEqual(toolLoopParts([], [], true, 10).map((p) => p.label), ['Model call 1'])
-})
-
-test('agent, a failed model call is marked; the strip counts it', () => {
-  const calls = [model(1, 900, 1000, { usage: { input: 5210, output: 312 } }), model(2, 40, 1300, { failed: true })]
-  const parts = toolLoopParts(calls, [tool('a', 1010, 1200)], false, 1400)
-  assert.deepEqual(parts.map((p) => p.state), ['done', 'done', 'failed'])
-  const facts = stripFacts({ modelCalls: calls }, 1400, false)
-  assert.deepEqual(facts, { timeMs: 1400, running: false, calls: 2, failed: 1, tokens: 5522 })
-  assert.equal(stripText(facts), '1.4 s · 2 model calls · 5,522 tokens')
-  assert.equal(stripLabel(facts), 'Diagnostics: 1.4 s · 2 model calls · 5,522 tokens · 1 failed. Open the details.')
-})
-
-test('agent, through the turn: each model call is placed by when it arrived', () => {
+test('agent, through the turn as the server sends it: two parallel tool calls overlap and share one segment, the total ends it', () => {
   let t = pendingTurn('t', 'q', agentTurns.empty(), 0, true)
-  t = applyEvent(agentTurns, t, { type: 'diagnostics', modelCalls: [{ index: 1, durationMs: 900 }] }, 1000)
-  t = applyEvent(agentTurns, t, { type: 'agent.tool_call', callId: 'c', tool: 'search', args: {} }, 1010)
-  t = applyEvent(agentTurns, t, { type: 'agent.tool_result', callId: 'c', result: [] }, 1300)
-  t = applyEvent(agentTurns, t, { type: 'diagnostics', modelCalls: [{ index: 2, durationMs: 700 }] }, 2100)
-  t = applyEvent(agentTurns, t, { type: 'final', reply: 'ok' }, 2150)
-  const parts = toolLoopParts(t.diagnostics!.modelCalls!, t.insight, false, t.finishedAt!)
-  assert.deepEqual(parts.map((p) => [p.label, p.durationMs]), [['Model call 1', 900], ['Search', 290], ['Model call 2', 700]])
+  for (const event of [
+    { type: 'thread', threadId: 'th' },
+    { type: 'diagnostics', steps: [{ index: 1, model: true, startMs: 12, durationMs: 1 }] },
+    { type: 'agent.tool_call', callId: 'a', tool: 'list_saved_queries', args: {} },
+    { type: 'agent.tool_call', callId: 'b', tool: 'get_entity', args: { entity_type_key: 'person', entity_id: 'missing' } },
+    { type: 'diagnostics', steps: [{ index: 2, name: 'list_saved_queries', startMs: 16, durationMs: 1 }] },
+    { type: 'agent.tool_result', callId: 'a', result: [] },
+    { type: 'diagnostics', steps: [{ index: 3, name: 'get_entity', startMs: 16, durationMs: 22 }] },
+    { type: 'agent.tool_result', callId: 'b', result: { error: 'Entity missing' } },
+    { type: 'diagnostics', steps: [{ index: 4, model: true, startMs: 38, durationMs: 0 }] },
+    { type: 'diagnostics', durationMs: 41 },
+    { type: 'final', reply: 'Done.' },
+  ] as const) t = applyEvent(agentTurns, t, event)
+  const { facts, segments } = answerSummary(t, 99999)
+  assert.deepEqual(segments.map((s) => [s.key, s.tone]), [['step-1', 'model'], ['step-2', 'work'], ['step-4', 'model']])
+  close(segments[1]!.share, 22 / 23)
+  assert.equal(stripText(facts), '41 ms · 2 model calls')
+  const rows = stepRows(t.diagnostics!.steps!, facts.timeMs, toolLabel)
+  assert.deepEqual(rows.map((r) => r.label), ['Model call', 'List saved queries', 'Get entity', 'Model call'])
+  assert.equal(rows[1]!.left, rows[2]!.left)
+  // A tool that answered with an error is not a failed step.
+  assert.equal(facts.failed, 0)
 })
 
-/* --------------------------------- generic ---------------------------------- */
+/* --------------------------------- running ---------------------------------- */
 
-test('timeline, running without a running part: a Working part at the end takes the rest of the elapsed time', () => {
-  const time = timeline([{ key: 'a', label: 'A', kind: 'model', state: 'done', durationMs: 300 }], 1000)
-  assert.deepEqual(time.parts.map((p) => [p.label, p.state, p.offsetMs, p.durationMs]), [['A', 'done', 0, 300], ['Working', 'running', 300, 700]])
-  // Server times may exceed the client's elapsed time: the rest is never negative.
-  assert.equal(timeline([{ key: 'a', label: 'A', kind: 'model', state: 'done', durationMs: 1300 }], 1000).parts.at(-1)!.durationMs, 0)
-  // No time at all: equal shares.
-  assert.deepEqual(segments(timeline([], 0)).map((s) => s.share), [1])
+test('a running answer: its time is the client clock; the time since the last finished step pulses at the end of the strip and as a last row', () => {
+  const running = { status: 'pending' as const, startedAt: 1000, diagnostics: { steps: [model(1, 2, 1400)] } }
+  const at = (now: number) => answerSummary(running, now)
+  assert.deepEqual(at(3000).segments.map((s) => [s.key, s.tone]), [['step-1', 'model'], ['running', 'running']])
+  // The segments cover the step and the time after it, not the 2 ms before the first step.
+  close(at(3000).segments[1]!.share, (2000 - 1402) / (1400 + 2000 - 1402))
+  // It grows with the clock.
+  assert.ok(at(5000).segments[1]!.share > at(3000).segments[1]!.share)
+  assert.equal(stripText(at(3000).facts), '2.0 s so far · 1 model call')
+  const rows = stepRows(running.diagnostics.steps, 2000, undefined, 2000)
+  assert.deepEqual(rows.map((r) => [r.label, r.tone]), [['Model call', 'model'], ['Running', 'running']])
+  close(rows[1]!.left, 70.1)
+  close(rows[1]!.width, 29.9)
+  // Before any step finished: only the running segment.
+  assert.deepEqual(answerSummary({ status: 'pending', startedAt: 0, diagnostics: {} }, 500).segments, [{ key: 'running', tone: 'running', failed: false, share: 1 }])
+  // Server times may run ahead of the client's elapsed time: the running part is then empty, never negative.
+  const ahead = answerSummary({ ...running, startedAt: 2000 }, 3000).segments
+  assert.deepEqual(ahead.map((s) => s.share), [1, 0])
+  // Once the total arrives and the answer ends, the server's time replaces the clock.
+  assert.equal(answerTime({ status: 'complete', startedAt: 1000, diagnostics: { durationMs: 1500 } }, 9000), 1500)
 })
 
-test('answer time: elapsed while running, else the reported total, the client clock, or the parts', () => {
-  assert.equal(answerTime({ status: 'pending', startedAt: 100 }, 5, 7, 1600), 1500)
-  assert.equal(answerTime({ status: 'complete', startedAt: 100, finishedAt: 600 }, 450, 7, 0), 450)
-  assert.equal(answerTime({ status: 'complete', startedAt: 100, finishedAt: 600 }, undefined, 7, 0), 500)
-  assert.equal(answerTime({ status: 'complete' }, undefined, 7, 0), 7)
+/* --------------------------------- failure ---------------------------------- */
+
+test('a failed step: red in the strip and the drawer, counted; a failed answer keeps its steps and, without the total, ends where its last step did', () => {
+  const steps = [model(1, 1, 900, { name: 'plan', usage: { input: 3100, output: 210 } }), work(2, 'retrieve', 903, 40), model(3, 950, 30, { name: 'answer', failed: true })]
+  const failed = ended({ steps }, 'failed')
+  assert.equal(answerTime(failed, 0), 980)
+  const { facts, segments } = answerSummary(failed, 0)
+  assert.deepEqual(segments.map((s) => s.failed), [false, false, true])
+  assert.deepEqual(facts, { timeMs: 980, running: false, modelCalls: 2, failed: 1, tokens: 3310 })
+  assert.equal(stripLabel(facts), 'Diagnostics: 980 ms · 2 model calls · 3,310 tokens · 1 failed. Open the details.')
+  const rows = stepRows(steps, 980)
+  assert.deepEqual(rows.map((r) => [r.label, r.failed]), [['plan', false], ['retrieve', false], ['answer', true]])
+  assert.deepEqual(rows[2]!.facts, [])
+  // With the total it ends there.
+  assert.equal(answerTime(ended({ steps, durationMs: 1000 }, 'failed'), 0), 1000)
 })
 
-test('strip text: a running answer says so far; no tokens reported, none shown', () => {
+/* ---------------------------------- plans ----------------------------------- */
+
+test('a step with a plan carries it to its row; steps have readable names, an unnamed model step is a model call', () => {
+  const plan = { summary: 'Looking for Project · starting at “Lena”' }
+  const rows = stepRows([model(1, 1, 300, { name: 'understand', plan }), work(2, 'anchor', 302, 10)], 400, (name) => name.toUpperCase())
+  assert.deepEqual(rows.map((r) => [r.label, r.plan]), [['UNDERSTAND', plan], ['ANCHOR', undefined]])
+  assert.equal(stepName({}), 'Model call')
+  assert.equal(stepName({ name: 'get_entity' }, toolLabel), 'Get entity')
+  assert.equal(stepName({ name: 'walk' }), 'walk')
+})
+
+test('navigator, through the turn: steps named by its pipeline, a repeated walk two rows, the understand step with its plan', () => {
+  let t = pendingTurn('t', 'q', graphTurns.empty(), 0, true)
+  const steps = ['understand', 'anchor', 'walk', 'focus', 'answer'].map((id) => ({ id, label: id[0]!.toUpperCase() + id.slice(1), description: '' }))
+  for (const event of [
+    { type: 'thread', threadId: 'th' },
+    { type: 'navigator.graph', steps, edges: [] },
+    { type: 'diagnostics', steps: [{ index: 1, name: 'understand', model: true, startMs: 1, durationMs: 1200, plan: { summary: 'starting at “Lena”' } }] },
+    { type: 'diagnostics', steps: [{ index: 2, name: 'anchor', startMs: 1201, durationMs: 90 }] },
+    { type: 'diagnostics', steps: [{ index: 3, name: 'walk', startMs: 1291, durationMs: 180 }] },
+    { type: 'diagnostics', steps: [{ index: 4, name: 'walk', startMs: 1471, durationMs: 100 }] },
+    { type: 'diagnostics', steps: [{ index: 5, name: 'focus', startMs: 1571, durationMs: 20 }] },
+    { type: 'diagnostics', steps: [{ index: 6, name: 'answer', model: true, startMs: 1591, durationMs: 2400, usage: { input: 6020, output: 380 } }] },
+    { type: 'diagnostics', durationMs: 4100 },
+    { type: 'final', reply: 'Nothing.' },
+  ] as const) t = applyEvent(graphTurns, t, event)
+  const rows = stepRows(t.diagnostics!.steps!, answerTime(t, 0), (name) => stepLabel(t.insight, name))
+  assert.deepEqual(rows.map((r) => [r.index, r.label, r.tone]), [
+    [1, 'Understand', 'model'], [2, 'Anchor', 'work'], [3, 'Walk', 'work'], [4, 'Walk', 'work'], [5, 'Focus', 'work'], [6, 'Answer', 'model'],
+  ])
+  assert.deepEqual(rows[0]!.plan, { summary: 'starting at “Lena”' })
+  assert.equal(stripText(answerSummary(t, 0).facts), '4.1 s · 2 model calls · 6,400 tokens')
+})
+
+/* ------------------------------- strip numbers ------------------------------ */
+
+test('strip numbers: no tokens reported, none shown; a reported 0 shown', () => {
   assert.equal(stripText(stripFacts({}, 3200, true)), '3.2 s so far · 0 model calls')
-  assert.equal(stripText(stripFacts({ modelCalls: [{ index: 1, durationMs: 1, usage: { output: 0 } }] }, 400, false)), '400 ms · 1 model call · 0 tokens')
-})
-
-test('answer summary: a running answer grows with the clock; an ended one keeps its time', () => {
-  const parts = [{ key: 'a', label: 'A', kind: 'model' as const, state: 'done' as const, durationMs: 500 }]
-  const running = { status: 'pending' as const, startedAt: 1000, diagnostics: {} }
-  assert.deepEqual([2000, 3000].map((now) => answerSummary(running, { parts }, now).time.totalMs), [1000, 2000])
-  assert.equal(answerSummary(running, { parts }, 3000).facts.running, true)
-  const ended = answerSummary({ status: 'failed', startedAt: 1000, finishedAt: 1800, diagnostics: {} }, { parts }, 9000)
-  assert.deepEqual([ended.time.totalMs, ended.facts.timeMs, ended.facts.running], [500, 800, false])
-})
-
-/* -------------------------------- navigator --------------------------------- */
-
-test('navigator: each run in order, a repeated step per round, a skipped step without time, model steps as model calls', () => {
-  const insight: GraphInsight = {
-    graph: {
-      steps: [
-        { id: 'understand', label: 'Understand', description: '', model: true },
-        { id: 'anchor', label: 'Anchor', description: '' },
-        { id: 'walk', label: 'Walk', description: '' },
-        { id: 'focus', label: 'Focus', description: '' },
-        { id: 'answer', label: 'Answer', description: '', model: true },
-      ],
-      edges: [],
-    },
-    steps: [
-      { id: 'understand', round: 1, status: 'done', durationMs: 1200 },
-      { id: 'anchor', round: 1, status: 'done', durationMs: 100 },
-      { id: 'walk', round: 1, status: 'done', durationMs: 200 },
-      { id: 'walk', round: 2, status: 'done', durationMs: 100 },
-      { id: 'focus', round: 1, status: 'skipped' },
-      { id: 'answer', round: 1, status: 'running' },
-    ],
-    summary: null,
-  }
-  const parts = graphParts(insight)
-  assert.deepEqual(parts.map((p) => [p.label, p.kind, p.state]), [
-    ['Understand', 'model', 'done'], ['Anchor', 'work', 'done'], ['Walk · round 1', 'work', 'done'], ['Walk · round 2', 'work', 'done'],
-    ['Focus', 'work', 'skipped'], ['Answer', 'model', 'running'],
-  ])
-  const time = timeline(parts, 4000)
-  assert.equal(time.parts.find((p) => p.key === 'answer-1')!.durationMs, 4000 - 1600)
-  // The skipped step is in the drawer's list but not in the bar.
-  assert.equal(time.parts.find((p) => p.key === 'focus-1')!.durationMs, 0)
-  assert.deepEqual(segments(time).map((s) => s.key), ['understand-1', 'anchor-1', 'walk-1', 'walk-2', 'answer-1'])
-  // A stopped answer: the run that did not finish took no time we know of.
-  const stopped = graphTurns.end!(insight, 0)
-  assert.equal(graphParts(stopped).at(-1)!.state, 'stopped')
-})
-
-/* -------------------------------- retriever --------------------------------- */
-
-test('retriever: stopped after planning — plan timed, retrieve stopped, answer not run; only plan in the bar', () => {
-  const parts = retrieverParts({ timings: { plan: 1100, planModel: 900 } }, { phase: 'retrieve' }, 'failed')
-  assert.deepEqual(parts.map((p) => [p.label, p.kind, p.state, p.durationMs]), [
-    ['Plan question', 'model', 'done', 1100], ['Search indices', 'work', 'stopped', undefined], ['Write answer', 'model', 'not-run', undefined],
-  ])
-  assert.deepEqual(segments(timeline(parts)).map((s) => s.key), ['plan'])
-})
-
-test('retriever: planning failed — the plan is marked failed with its time, the later steps did not run', () => {
-  // The server ends the phase with its time, then the error: nothing was searched.
-  let t = pendingTurn('t', 'q', retrieverTurns.empty(), 0, true)
-  t = applyEvent(retrieverTurns, t, { type: 'retriever.phase', phase: 'plan', status: 'start' }, 1)
-  t = applyEvent(retrieverTurns, t, { type: 'retriever.phase', phase: 'plan', status: 'end', durationMs: 900 }, 901)
-  t = applyEvent(retrieverTurns, t, { type: 'error', error: { code: 'MODEL_ERROR', message: 'failed' } }, 902)
-  const parts = retrieverParts(t.diagnostics!, t.insight, t.status)
-  assert.deepEqual(parts.map((p) => [p.key, p.state, p.durationMs]), [['plan', 'failed', 900], ['retrieve', 'not-run', undefined], ['answer', 'not-run', undefined]])
-  assert.deepEqual(segments(timeline(parts)).map((s) => [s.key, s.state]), [['plan', 'failed']])
-})
-
-test('retriever, running: an ended phase is timed before its timings arrive; the started one runs, later ones wait', () => {
-  let t = pendingTurn('t', 'q', retrieverTurns.empty(), 0, true)
-  t = applyEvent(retrieverTurns, t, { type: 'retriever.phase', phase: 'plan', status: 'start' }, 1)
-  t = applyEvent(retrieverTurns, t, { type: 'retriever.phase', phase: 'plan', status: 'end', durationMs: 1100 }, 1101)
-  t = applyEvent(retrieverTurns, t, { type: 'retriever.phase', phase: 'retrieve', status: 'start' }, 1102)
-  const parts = retrieverParts(t.diagnostics!, t.insight, t.status)
-  assert.deepEqual(parts.map((p) => [p.key, p.state, p.durationMs]), [['plan', 'done', 1100], ['retrieve', 'running', undefined], ['answer', 'waiting', undefined]])
-  assert.equal(timeline(parts, 1500).parts[1]!.durationMs, 400)
-  // A complete answer: its timings decide.
-  assert.deepEqual(retrieverParts({ timings: { plan: 1000, retrieve: 300, answer: 2000 } }, {}, 'complete').map((p) => p.durationMs), [1000, 300, 2000])
+  assert.equal(stripText(stripFacts({ steps: [model(1, 0, 1, { usage: { output: 0 } })] }, 400, false)), '400 ms · 1 model call · 0 tokens')
+  assert.equal(stripText(stripFacts({ steps: [model(1, 0, 1, { usage: { cacheRead: 4800 } })] }, 400, false)), '400 ms · 1 model call')
+  // No time at all: equal shares.
+  assert.deepEqual(stripSegments([work(1, 'a', 0, 0), work(2, 'b', 0, 0)]).map((s) => s.share), [0.5, 0.5])
 })
 
 /* ------------------------------- conversation ------------------------------- */
 
 test('several answers in one conversation: each keeps its own diagnostics; the drawer follows the latest or the chosen one and steps between them', () => {
-  const turn = (id: string, diagnostics?: object): Turn<null> => ({
+  const turn = (id: string, diagnostics?: Diagnostics): Turn<null> => ({
     id, question: id, reply: '', status: 'complete', entities: [], links: [], insight: null, ...(diagnostics && { diagnostics }),
   })
-  const turns = [turn('a', { modelCalls: [{ index: 1, durationMs: 1 }] }), turn('b'), turn('c', {}), turn('d', { modelCalls: [] })]
+  const turns = [
+    turn('a', { steps: [model(1, 0, 10)], durationMs: 12 }),
+    turn('b'),
+    turn('c', {}),
+    turn('d', { steps: [model(1, 0, 5), work(2, 'search', 6, 3), model(3, 10, 4)], durationMs: 15 }),
+  ]
   assert.deepEqual(diagnosedTurns(turns).map((t) => t.id), ['a', 'c', 'd'])
   assert.equal(drawerTurn(turns, null)?.id, 'd')
   assert.equal(drawerTurn(turns, 'a')?.id, 'a')
@@ -235,6 +206,12 @@ test('several answers in one conversation: each keeps its own diagnostics; the d
   assert.deepEqual(stepping(turns, 'a'), { position: 1, count: 3, previous: null, next: 'c' })
   assert.deepEqual(stepping(turns, 'c'), { position: 2, count: 3, previous: 'a', next: 'd' })
   assert.deepEqual(stepping(turns, 'd'), { position: 3, count: 3, previous: 'c', next: null })
-  // Each answer's numbers are its own.
-  assert.deepEqual(diagnosedTurns(turns).map((t) => stripFacts(t.diagnostics!, 0, false).calls), [1, 0, 0])
+  // Each answer's numbers and bar are its own.
+  assert.deepEqual(diagnosedTurns(turns).map((t) => stripText(answerSummary(t, 0).facts)), ['12 ms · 1 model call', '0 ms · 0 model calls', '15 ms · 2 model calls'])
+  assert.deepEqual(diagnosedTurns(turns).map((t) => answerSummary(t, 0).segments.length), [1, 0, 3])
+})
+
+test('a turn that asks for diagnostics has them from the start; one that does not has none', () => {
+  assert.deepEqual(pendingTurn('a', 'q', [], 0, true).diagnostics, {})
+  assert.equal(pendingTurn('a', 'q', [], 0).diagnostics, undefined)
 })

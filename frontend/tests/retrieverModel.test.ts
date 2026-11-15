@@ -2,10 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   retrieverExecution, defaultAnswerFields, draftOf, draftProblems, editableConfig, emptyConfig, filterChoices, filterLabel,
-  callCounts, importProblem, modelCallName, isSupportedRetriever, stepText, newFilter, plannedFilterText, relationName, resultTypes, resultsBySubQuery, sameDraft,
+  importProblem, isSupportedRetriever, newFilter, phaseName, plannedFilterText, relationName, resultTypes, sameDraft,
   toInput, withIndex, withRelations, withoutIndex, type RetrieverSchema,
 } from '../src/components/assistants/retrievers/retrieverModel.ts'
-import { chatRetriever, readRetrieverStream, saveRetriever, type Retriever, type RetrieverConfig } from '../src/api/retrievers.ts'
+import { chatRetriever, readRetrieverStream, retrieverPlan, saveRetriever, type Retriever, type RetrieverConfig } from '../src/api/retrievers.ts'
 import type { SearchCatalogEntry } from '../src/api/types.ts'
 
 const prop = (key: string, dataType = 'string') => ({ key, displayName: key[0].toUpperCase() + key.slice(1), dataType })
@@ -127,13 +127,7 @@ test('imports need a version 2 export whose key is free', () => {
   assert.match(importProblem({ ...body, configVersion: 1 }, []) ?? '', /version 2/)
 })
 
-test('diagnostics: results group per sub-query, planned filters read from their carried definition', () => {
-  const result = (subQuery: number, entityId: string) => ({ entityId, entityType: 'person', label: null, subQuery, answerFields: {} })
-  const groups = resultsBySubQuery({
-    plan: { subQueries: [{ indices: ['person~default'], relations: [], query: 'q0', variants: [], mode: 'hybrid', filters: [] }] },
-    results: [result(1, 'b'), result(0, 'a'), result(0, 'c')],
-  })
-  assert.deepEqual(groups.map((g) => [g.subQuery, g.plan?.query ?? null, g.results.map((r) => r.entityId)]), [[0, 'q0', ['a', 'c']], [1, null, ['b']]])
+test('a plan: planned filters read from their carried definition, relation groups by their label', () => {
   // The label comes from the definition the planned filter carries, not from a configuration.
   assert.equal(plannedFilterText({ id: 'own', entityType: 'person', path: [], field: 'email', value: 'a@b.c', quote: 'a@b.c' }, schema), 'Person · Email = a@b.c (from “a@b.c”)')
   const hop = { relationTypeKey: 'works_for', direction: 'outgoing' as const }
@@ -149,21 +143,27 @@ function stream(events: unknown[]) {
 
 const T = { type: 'thread', threadId: 't1' }
 
-test('the stream reader accepts the retriever\'s diagnostics fields and rejects malformed ones', async () => {
-  const received: unknown[] = []
-  await readRetrieverStream(stream([
+const PLAN = {
+  subQueries: [{ indices: ['person~default'], relations: [], query: 'Bob role at ACME', variants: [], mode: 'keyword', filters: [{ id: 'own', value: 'x', quote: 'x', entityType: 'person', path: [], field: 'email' }], previous: null }],
+  unsupportedReason: null,
+}
+
+test('the stream reader reads the retriever\'s phases and its steps in diagnostics, a planning step with its plan', async () => {
+  const events = [
     T,
-    { type: 'diagnostics', modelCalls: [{ index: 1, name: 'plan', durationMs: 3, usage: { input: 1, output: 2 }, systemPrompt: 's', input: '{}', inputTruncated: false, output: '{}', outputTruncated: false }] },
-    { type: 'diagnostics', plan: { subQueries: [{ indices: ['person~default'], relations: [], query: 'q', variants: [], mode: 'hybrid', filters: [] }] } },
-    { type: 'diagnostics', results: [{ entityId: 'e1', entityType: 'person', label: 'Ada', subQuery: 0, answerFields: { name: 'Ada' }, matched: { index: 'person~default', partKind: 'self' } }], limitations: [], searchCalls: 1, timings: { retrieve: 1.5 } },
+    { type: 'retriever.phase', phase: 'plan', status: 'start' },
+    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 900, usage: { input: 1, output: 2 }, plan: PLAN }] },
+    { type: 'retriever.phase', phase: 'plan', status: 'end' },
+    { type: 'retriever.phase', phase: 'retrieve', status: 'start' },
+    { type: 'diagnostics', steps: [{ index: 2, name: 'retrieve', startMs: 902, durationMs: 40 }] },
+    { type: 'retriever.phase', phase: 'retrieve', status: 'end' },
+    { type: 'diagnostics', durationMs: 960 },
     { type: 'final', reply: 'Ada' },
-  ]), (event) => received.push(event), new AbortController().signal)
-  assert.equal(received.length, 5)
-  const fails = (event: object) => assert.rejects(readRetrieverStream(stream([T, { type: 'diagnostics', ...event }]), () => {}, new AbortController().signal), /Invalid diagnostics/)
-  await fails({ results: [{ entityId: 'e1' }] })
-  await fails({ searchCalls: '1' })
-  await fails({ modelCalls: [{ index: 1, durationMs: 1, output: 42 }] })
-  await fails({ modelCalls: [{ index: 1, durationMs: 1, outputTruncated: 'yes' }] })
+  ]
+  const received: unknown[] = []
+  await readRetrieverStream(stream(events), (event) => received.push(event), new AbortController().signal)
+  assert.deepEqual(received, events)
+  await assert.rejects(readRetrieverStream(stream([T, { type: 'retriever.phase', phase: 'plan', status: 'paused' }]), () => {}, new AbortController().signal), /Invalid event/)
   await assert.rejects(readRetrieverStream(stream([T, { type: 'delta', text: 'Partial' }]), () => {}, new AbortController().signal), /Connection closed/)
   // The final answer must be the streamed text.
   await assert.rejects(readRetrieverStream(stream([T, { type: 'delta', text: 'Ada' }, { type: 'final', reply: 'Bob' }]), () => {}, new AbortController().signal), /Invalid final/)
@@ -206,22 +206,15 @@ test('chat and save use the assistant routes and never send browser configuratio
   } finally { globalThis.fetch = original }
 })
 
-test('a finished turn never looks pending: missing steps read stopped / not run, model calls count the reported ones', () => {
-  const timings = { plan: 800 }
-  assert.deepEqual(['plan', 'retrieve', 'answer'].map((s) => stepText(timings, s as 'plan', 'pending')), ['800 ms', '…', '…'])
-  assert.deepEqual(['plan', 'retrieve', 'answer'].map((s) => stepText(timings, s as 'plan', 'failed')), ['800 ms', 'stopped', 'not run'])
-  assert.equal(stepText({}, 'answer', 'complete'), 'not run')
-  const planned = { modelCalls: [{ index: 1, name: 'plan', durationMs: 5 }] }
-  assert.deepEqual(callCounts(planned, 'failed'), { model: 1, search: 0 })
-  assert.deepEqual(callCounts(planned, 'pending'), { model: 1, search: null })
-  assert.deepEqual(callCounts({}, 'pending'), { model: null, search: null })
-  assert.deepEqual(callCounts({}, 'complete'), { model: 0, search: 0 })
-  assert.deepEqual(callCounts({ ...planned, searchCalls: 3 }, 'complete'), { model: 1, search: 3 })
-})
-
-test('model calls are named; a repeated planning call is the repeated planner', () => {
-  assert.equal(modelCallName('plan'), 'Planner')
-  assert.equal(modelCallName('replan'), 'Planner (repeated)')
-  assert.equal(modelCallName('answer'), 'Response')
-  assert.equal(modelCallName('other'), 'other')
+test('a step\'s plan reads as a retriever plan only in its shape; the steps have readable names', () => {
+  assert.equal(retrieverPlan(PLAN), PLAN)
+  assert.deepEqual(retrieverPlan({ subQueries: [], unsupportedReason: 'already answered' }), { subQueries: [], unsupportedReason: 'already answered' })
+  for (const bad of [
+    null, 'plan', {}, { subQueries: {} },
+    { subQueries: [{ ...PLAN.subQueries[0], indices: 'person~default' }] },
+    { subQueries: [{ ...PLAN.subQueries[0], variants: undefined }] },
+    { subQueries: [{ ...PLAN.subQueries[0], filters: [{ id: 'own' }] }] },
+    { subQueries: [], unsupportedReason: 3 },
+  ]) assert.equal(retrieverPlan(bad), null, JSON.stringify(bad))
+  assert.deepEqual(['plan', 'replan', 'retrieve', 'answer', 'other'].map(phaseName), ['Plan question', 'Plan question again', 'Search indices', 'Write answer', 'other'])
 })

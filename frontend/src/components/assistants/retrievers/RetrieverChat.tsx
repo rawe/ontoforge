@@ -1,11 +1,11 @@
 import { Activity } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AssistantChat, type ChatRequest } from '@/assistants'
-import { chatRetriever, type RetrieverDiagnostics, type RetrieverModelCall } from '@/api/retrievers'
+import { chatRetriever, retrieverPlan } from '@/api/retrievers'
 import type { RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { EntityCardList } from '@/components/assistants/entities/EntityCardList'
-import { RetrieverCallTexts, RetrieverPlan, RetrieverResults, RetrieverTimingDetails } from './RetrieverDiagnostics'
-import { MODEL_CALLS_INTRO, callCounts, modelCallName, retrieverParts, retrieverTurns } from './retrieverModel'
+import { RetrieverPlan } from './RetrieverPlan'
+import { phaseName, retrieverTurns } from './retrieverModel'
 
 interface RetrieverChatProps {
   ontologyKey: string
@@ -31,13 +31,11 @@ interface RetrieverChatProps {
   actions?: HTMLElement | null
 }
 
-const metaOf = (diagnostics: unknown) => (diagnostics ?? {}) as RetrieverDiagnostics
-
 /**
  * The retriever kind of the assistant chat — the Workbench Retrievers tab
  * and the Studio test panel: the running phase as live detail and each
  * answer's entities in the side panel. Diagnostics: its plan, retrieve and
- * answer steps, its model calls with their texts, its plan and results.
+ * answer steps, a planning step opening to the plan it made.
  */
 export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, description, blockedReason, diagnostics, remember, catalog, schema, picker, actions }: RetrieverChatProps) {
   return (
@@ -59,27 +57,10 @@ export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, descri
       actions={actions}
       diagnostics={{
         mode: diagnostics,
-        time: (turn) => {
-          const meta = metaOf(turn.diagnostics)
-          return { parts: retrieverParts(meta, turn.insight, turn.status), totalMs: meta.timings?.total }
-        },
-        timeNote: 'The three steps run one after another.',
-        timeDetail: (turn) => <RetrieverTimingDetails meta={metaOf(turn.diagnostics)} />,
-        facts: (turn) => {
-          const search = callCounts(metaOf(turn.diagnostics), turn.status).search
-          return search === null ? [] : [`${search} ${search === 1 ? 'search call' : 'search calls'}`]
-        },
-        calls: {
-          intro: MODEL_CALLS_INTRO,
-          nameOf: modelCallName,
-          detail: (call) => <RetrieverCallTexts call={call as RetrieverModelCall} />,
-        },
-        tabs: (turn) => {
-          const meta = metaOf(turn.diagnostics)
-          return [
-            { value: 'plan', label: 'Plan', content: <RetrieverPlan meta={meta} catalog={catalog} schema={schema} /> },
-            { value: 'results', label: `Results${meta.results ? ` (${meta.results.length})` : ''}`, content: <RetrieverResults meta={meta} catalog={catalog} schema={schema} /> },
-          ]
+        nameOf: phaseName,
+        plan: (value) => {
+          const plan = retrieverPlan(value)
+          return plan === null ? null : <RetrieverPlan plan={plan} catalog={catalog} schema={schema} />
         },
       }}
       insight={{

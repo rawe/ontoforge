@@ -1,24 +1,24 @@
 import { AlertCircle, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Turn } from '../conversation/chatModel'
-import { TimeBar, type DiagnosticsSlot } from './DiagnosticsView'
-import { answerSummary, failedText, segments, stripLabel, stripText } from './timeline'
+import { TimeBar } from './DiagnosticsView'
+import { answerSummary, failedText, stripLabel, stripText } from './timeline'
 import { useNow } from './useNow'
 
 /**
- * One line under an answer with diagnostics: a small bar of where its time
- * went, its time, model calls and tokens, and a mark when a call failed.
- * It grows while the answer runs; a click opens the drawer on it.
+ * One line under an answer with diagnostics: a small bar of its steps, its
+ * time, model calls and tokens, and a mark when a step failed. It grows
+ * with each finished step while the answer runs; a click opens the drawer
+ * on it.
  */
-export function DiagnosticsStrip<I>({ turn, slot, open, onOpen }: {
+export function DiagnosticsStrip<I>({ turn, open, onOpen }: {
   turn: Turn<I>
-  slot: DiagnosticsSlot<I>
   /** The drawer shows this answer. */
   open: boolean
   onOpen: () => void
 }) {
   const now = useNow(turn.status === 'pending')
-  const { time, facts } = answerSummary(turn, slot.time(turn, now), now)
+  const { facts, segments } = answerSummary(turn, now)
   const failed = failedText(facts)
   return (
     <button
@@ -34,7 +34,7 @@ export function DiagnosticsStrip<I>({ turn, slot, open, onOpen }: {
         open && 'bg-secondary text-foreground',
       )}
     >
-      <TimeBar items={segments(time)} />
+      <TimeBar items={segments} />
       <span className="min-w-0 truncate tabular-nums">{stripText(facts)}</span>
       {failed !== null && (
         <span className="flex shrink-0 items-center gap-1 text-destructive">

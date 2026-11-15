@@ -6,7 +6,7 @@ import type { AssistantKind } from '@/api/types'
 import { CitedAnswer } from '@/components/assistants/entities/CitedAnswer'
 import { readString, storageKeys, writeString } from '@/lib/storage'
 import { EvidenceSidebar, type SidebarView } from './EvidenceSidebar'
-import { graphParts, graphTurns, stepLabel } from './graphTurnModel'
+import { graphTurns, stepLabel } from './graphTurnModel'
 
 export interface GraphChatProps {
   ontologyKey: string
@@ -39,8 +39,9 @@ export interface GraphChatProps {
 /**
  * The assistant chat of every graph kind: the evidence sidebar (Entities,
  * Graph, Steps) fills while an answer streams, and the answer's citations
- * are chips that select their card there. Diagnostics: its steps' times
- * and its model calls named by step.
+ * are chips that select their card there. Diagnostics: its steps named by
+ * the pipeline, the Understand step opening to the sentence it read the
+ * question as.
  */
 export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
   const [switchedOn, setSwitchedOn] = useState(() => readString(storageKeys.graphSidebar(kind)) !== 'false')
@@ -70,15 +71,8 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
         : undefined}
       diagnostics={{
         mode: sidebar,
-        time: (turn) => ({ parts: graphParts(turn.insight), totalMs: turn.insight.summary?.durationMs }),
-        facts: (turn) => {
-          const summary = turn.insight.summary
-          return [
-            ...(summary?.entities !== undefined ? [`${summary.entities} ${summary.entities === 1 ? 'entity' : 'entities'}`] : []),
-            ...(summary?.evidence !== undefined ? [`${summary.evidence} evidence`] : []),
-          ]
-        },
-        calls: { nameOf: (name, turn) => stepLabel(turn.insight, name) },
+        nameOf: (name, turn) => stepLabel(turn.insight, name),
+        plan: (plan) => (typeof plan.summary === 'string' ? <p className="text-xs">{plan.summary}</p> : null),
       }}
       renderAnswer={(turn, show) => (
         <CitedAnswer

@@ -17,7 +17,6 @@ export {
 } from './stream/chatStream'
 export {
   DEFAULT_ASSISTANT,
-  formatDuration,
   hasDetail,
   type Turn,
   type TurnModel,
@@ -35,11 +34,9 @@ export {
   type InsightView,
 } from './shell/AssistantChat'
 export { ToolCallPanel, ToolCallsSummary } from './steps/ToolCallPanel'
-export type { Diagnostics, ModelCall } from './diagnostics/diagnostics'
 export type { DiagnosticsSlot } from './diagnostics/DiagnosticsView'
 export type { DiagnosticsMode } from './diagnostics/useDiagnostics'
-export { toolLoopParts } from './steps/toolCallModel'
-export { agentTurns, type AgentEvent } from './steps/toolCallModel'
+export { agentTurns, toolLabel, type AgentEvent } from './steps/toolCallModel'
 export { adapterOf, adapters, type AdapterKind } from './adapters'
 export { StepList } from './adapters/navigators/StepList'
 export type { AnyAdapter, Binding, Focus, PresentationAdapter, ToolCard } from './types'

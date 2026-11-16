@@ -111,6 +111,18 @@ direction: the node panel lists every applicable relation type with its exact ne
 count, and clicking one pulls in the first ten neighbours; repeated clicks pull ten more,
 up to two hundred, and stop offering more once the count is exhausted.
 
+**Quick load.** The toolbar and empty canvas offer a direct way to fill the working
+set with existing entities, without AI. Choose every entity type the lens exposes and
+the type filter shows, or one of those types, then a maximum addition of 25, 50, 100 or 200 entities (100 by default),
+clamped to the canvas's remaining capacity. Reads are balanced across the chosen
+types, paging past entities already present and reusing spare capacity when a type
+runs out. Existing nodes and their positions stay in place. The action also reads
+the connections of the added entities, outgoing and incoming, to every working-set
+entity, through the same lens; entities already present are not read again. It reads at
+most 200 relations per added entity, direction and relation type and reports when more
+exist, pointing to node expansion. A failed read reports an error before
+anything is added. No entity or relation is created or changed by loading the canvas.
+
 **Layout stability is a contract.** Nothing ever repositions a node the user can already
 see. New nodes are placed on growing elliptical rings around a placement origin — the
 expanding node, or the centroid of the canvas for additions without one — taking the first

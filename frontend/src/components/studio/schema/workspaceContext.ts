@@ -37,7 +37,7 @@ export interface SchemaWorkspace {
   propertyRequest: PropertyRequest | null
   /** Select a type (and open one of its properties), or clear the selection. Replaces the address. */
   select: (selection: SchemaSelection | null, options?: SelectOptions) => void
-  /** Switch Graph ⇄ Classic, keeping the selection and the property. Pushes the address. */
+  /** Switch Graph, 3D or Classic, keeping the selection and the property. Pushes the address. */
   switchView: (view: SchemaView) => void
   /** Cleared by the next `select` or view switch. */
   addPropertyRequest: AddPropertyRequest | null

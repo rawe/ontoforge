@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Box, Command, PanelTop, Plus, SearchX, ShieldCheck, Waypoints } from 'lucide-react'
+import { Box, Boxes, Command, PanelTop, Plus, SearchX, ShieldCheck, Waypoints } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { schemaFocus, usePublishFocus } from '@/assistants'
 import * as model from '@/api/model'
@@ -36,8 +36,12 @@ const SchemaCanvas = lazy(() =>
   import('@/components/studio/graph/SchemaCanvas').then((m) => ({ default: m.SchemaCanvas })),
 )
 
+const SchemaGraph3D = lazy(() =>
+  import('@/components/studio/graph/SchemaGraph3D').then((m) => ({ default: m.SchemaGraph3D })),
+)
+
 /**
- * `/o/:ontologyKey/studio/schema/…` — the schema page: Graph (default) or
+ * `/o/:ontologyKey/studio/schema/…` — the schema page: Graph (default), 3D or
  * Classic, one page for every schema address so switching views keeps the
  * shell. View and selection come from the address (`schemaUrl.ts`).
  */
@@ -68,7 +72,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
     onError: toastError,
   })
 
-  // `V` switches Graph ⇄ Classic from either view, like the tabs. An effect
+  // `V` switches Graph ⇄ Classic, or exits 3D to Graph. An effect
   // event, so the listener always sees the latest render's view and selection.
   const onKey = useEffectEvent((e: KeyboardEvent) => {
     if ((e.key !== 'v' && e.key !== 'V') || e.shiftKey || e.repeat || !isPlainKey(e)) return
@@ -102,7 +106,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
         className="py-24"
       />
     )
-  } else if (empty && view === 'classic') {
+  } else if (empty && view !== 'graph') {
     body = (
       <EmptyState
         icon={Box}
@@ -117,6 +121,10 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
     )
   } else if (view === 'classic') {
     body = <ClassicList />
+  } else if (view === '3d') {
+    body = (
+      <Suspense fallback={<BodySkeleton />}><SchemaGraph3D /></Suspense>
+    )
   } else {
     body = (
       <Suspense fallback={null}>
@@ -146,7 +154,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
           description="Entity types, relation types and their properties of this ontology. Every change is live."
           actions={
             <>
-              {view === 'classic' && (
+              {view !== 'graph' && (
                 <>
                   <Button size="sm" onClick={() => setCreateEntityOpen(true)}>
                     <Plus className="size-3.5" /> Entity type
@@ -189,7 +197,7 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
           <div className={view === 'classic' ? 'relative min-w-0 flex-1 overflow-y-auto' : 'min-w-0 flex-1'}>
             {body}
           </div>
-          {view === 'graph' && loaded && <Inspector />}
+          {view !== 'classic' && loaded && <Inspector />}
         </div>
       </div>
 
@@ -222,6 +230,12 @@ function ViewTabs({ view, onChange }: { view: SchemaView; onChange: (view: Schem
             </TabsTrigger>
           </TooltipTrigger>
           <TooltipContent side="bottom">Graph view · switch with V</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <TabsTrigger value="3d"><Boxes className="size-3.5" /> 3D</TabsTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Explore the ontology in 3D</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>

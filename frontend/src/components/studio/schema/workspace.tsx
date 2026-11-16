@@ -105,7 +105,7 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
   // An unknown key in the graph leaves the address (the classic page shows not-found instead).
   const schema = useModelSchema(ontologyKey)
   const unknown =
-    view === 'graph' &&
+    view !== 'classic' &&
     sel !== null &&
     !schema.isPending &&
     schema.error === null &&
@@ -115,8 +115,8 @@ export function SchemaWorkspaceProvider({ ontologyKey, children }: SchemaWorkspa
     if (!unknown || sel === null || leaving.current !== null) return
     const kind = sel.kind === 'entity-types' ? 'entity' : 'relation'
     toast.error(`No ${kind} type "${sel.key}"`, { id: 'schema-unknown-selection' })
-    void navigate(buildSchemaUrl(ontologyKey, 'graph', null), { replace: true })
-  }, [unknown, sel, here, navigate, ontologyKey])
+    void navigate(buildSchemaUrl(ontologyKey, view, null), { replace: true })
+  }, [unknown, sel, here, navigate, ontologyKey, view])
 
   const value = useMemo<SchemaWorkspace>(
     () => ({

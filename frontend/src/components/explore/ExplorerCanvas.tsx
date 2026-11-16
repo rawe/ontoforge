@@ -48,8 +48,11 @@ import { CanvasToolbar, SelectionBar, type TypeFilterEntry } from './CanvasToolb
 import { ConnectDialog, type ConnectPair } from './ConnectDialog'
 import { EdgePopover } from './EdgePopover'
 import { EntityNode } from './EntityNode'
+import { ExploreGraph3D } from './ExploreGraph3D'
 import { NodePanel } from './NodePanel'
 import { RelationEdge } from './RelationEdge'
+import { QuickLoadDialog } from './QuickLoadDialog'
+import { connectingRelations, planRelationReads, sampleEntities } from './quickLoad'
 import { useAskDock } from './useAskDock'
 import {
   MAX_NODES,
@@ -133,7 +136,17 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   const rootRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [hydrated, setHydrated] = useState(false)
+  const [quickLoadOpen, setQuickLoadOpen] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
+  const graphView = searchParams.get('view') === '3d' ? '3d' : '2d'
+  const setGraphView = useCallback((view: '2d' | '3d') => {
+    const next = new URLSearchParams(searchParams)
+    if (view === '3d') next.set('view', '3d')
+    else next.delete('view')
+    setSearchParams(next)
+  }, [searchParams, setSearchParams])
+  const [fitRequest, setFitRequest] = useState(0)
+  const [revealRequest, setRevealRequest] = useState(0)
   /** The Hierarchy edges filter: only parent relations' edges show; no node moves. */
   const [hierarchyOnly, setHierarchyOnly] = useState(false)
   const [connectPair, setConnectPair] = useState<ConnectPair | null>(null)
@@ -263,6 +276,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
 
   const centerOn = useCallback(
     (position: XYPosition) => {
+      setRevealRequest((request) => request + 1)
       void reactFlow.setCenter(
         position.x + NODE_WIDTH / 2,
         position.y + NODE_HEIGHT / 2,
@@ -336,6 +350,31 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
     },
     [centerOn, typeNameOf],
   )
+
+  const quickLoad = useCallback(async (typeKeys: string[], requested: number) => {
+    const current = wsRef.current.nodes
+    const limit = Math.min(requested, MAX_NODES - current.length)
+    if (limit <= 0) throw new Error(capMessage)
+    const entities = await sampleEntities(typeKeys, new Set(current.map(node => node.id)), limit,
+      (key, page) => runtime.listEntities(ontologyKey, lensKey, key, page))
+    const ids = new Set([...current.map(node => node.id), ...entities.map(entity => entity._id)])
+    const reads = planRelationReads(schemaRef.current.relationTypes, entities)
+    const results = await mapBounded(reads, PARALLEL_READS, ({ type, direction, entityId }) =>
+      runtime.listRelations(ontologyKey, lensKey, type,
+        direction === 'outgoing' ? { fromEntityId: entityId, limit: 200 } : { toEntityId: entityId, limit: 200 }))
+    const failed = results.find(result => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
+    const pages = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+    const relations = connectingRelations(pages, ids)
+    if (!addEntities(entities)) throw new Error(capMessage)
+    dispatch({ type: 'addEdges', relations })
+    setFitRequest(request => request + 1)
+    window.setTimeout(() => { void reactFlow.fitView({ ...fitOptions(), duration: 300 }) }, 60)
+    toast.success(entities.length === 0 ? 'No new entities to add.' : `Added ${entities.length} entities and their connections.`)
+    if (pages.some(page => page.total > page.items.length)) {
+      toast.info('Some connections were omitted. Expand a node’s relations to explore more.')
+    }
+  }, [ontologyKey, lensKey, addEntities, reactFlow, fitOptions])
 
   const selectOnly = useCallback((id: string | null) => {
     dispatch({
@@ -428,6 +467,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
       const onCanvas = new Set([...wsRef.current.nodes.map((n) => n.id), ...fetched.map((e) => e._id)])
       await addAnswerEdges(answer, onCanvas)
       if (fetched.length > 0) {
+        setFitRequest((request) => request + 1)
         window.setTimeout(() => {
           void reactFlow.fitView({ ...fitOptions(), duration: 300 })
         }, 60)
@@ -478,6 +518,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
       )
       const entities = results.flatMap((res) => (res.status === 'fulfilled' ? [res.value] : []))
       if (entities.length > 0 && addEntities(entities)) {
+        setFitRequest((request) => request + 1)
         window.setTimeout(() => {
           void reactFlow.fitView({ ...fitOptions(), duration: 300 })
         }, 60)
@@ -546,6 +587,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   )
 
   const relayout = useCallback(() => {
+    setFitRequest((request) => request + 1)
     const positions = relayoutPositions(wsRef.current.nodes, wsRef.current.edges)
     setRelayouting(true)
     dispatch({ type: 'setPositions', positions })
@@ -556,6 +598,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   }, [reactFlow, fitOptions])
 
   const fit = useCallback(() => {
+    setFitRequest((request) => request + 1)
     void reactFlow.fitView({ ...fitOptions(), duration: 300 })
   }, [reactFlow, fitOptions])
 
@@ -569,6 +612,8 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   // F = fit view, P = pin toggle, A = ask dock (Delete/Backspace handled by React Flow).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // The 3D canvas owns its movement keys while exploring in space.
+      if (graphView === '3d') return
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const target = e.target as HTMLElement | null
       if (
@@ -591,7 +636,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [fit, togglePinSelection, askOff, dock])
+  }, [fit, togglePinSelection, askOff, dock, graphView])
 
   /* ------------------------------ derived state ------------------------------ */
 
@@ -707,7 +752,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
         />
       )}
       <div ref={containerRef} className="relative h-full min-w-0 flex-1">
-        <div className={relayouting ? 'of-relayout h-full w-full' : 'h-full w-full'}>
+        <div className={`${relayouting ? 'of-relayout ' : ''}h-full w-full${graphView === '3d' ? ' invisible pointer-events-none' : ''}`} aria-hidden={graphView === '3d' || undefined} inert={graphView === '3d' || undefined}>
           <ReactFlow<EntityFlowNode, RelationFlowEdge>
             nodes={rfNodes}
             edges={rfEdges}
@@ -720,7 +765,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
             minZoom={0.1}
             maxZoom={2.5}
-            deleteKeyCode={['Backspace', 'Delete']}
+            deleteKeyCode={graphView === '2d' ? ['Backspace', 'Delete'] : null}
             multiSelectionKeyCode={['Meta', 'Shift']}
             onEdgeClick={(event, edge) =>
               setEdgePopover({ id: edge.id, x: event.clientX, y: event.clientY })
@@ -740,13 +785,45 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
           </ReactFlow>
         </div>
 
+        {graphView === '3d' && (
+          <div className="absolute inset-0">
+            <ExploreGraph3D
+              nodes={rfNodes}
+              edges={rfEdges}
+              schema={schema}
+              title={`${schema.lens.name} · Working set`}
+              selectedNodeId={panelNode?.id ?? null}
+              selectedEdgeId={edgePopover?.id ?? null}
+              fitRequest={fitRequest}
+              revealRequest={revealRequest}
+              onSelectNode={(id) => {
+                selectOnly(id)
+                setEdgePopover(null)
+                if (id === null) setShownEntity(null)
+              }}
+              onSelectEdge={(id, at) => {
+                selectOnly(null)
+                setEdgePopover({ id, ...at })
+              }}
+              onHoverNode={setHoveredNode}
+              onExit3D={() => setGraphView('2d')}
+            />
+          </div>
+        )}
+
         <CanvasToolbar
           nodeCount={ws.nodes.length}
           pinnedCount={pinnedCount}
           types={typeFilters}
           onSearch={openPalette}
+          onQuickLoad={() => setQuickLoadOpen(true)}
           onFit={fit}
           onRelayout={relayout}
+          view={{ mode: graphView, onChange: (mode) => {
+            setGraphView(mode)
+            setEdgePopover(null)
+            setHoveredNode(null)
+          } }}
           onClear={(mode) => dispatch({ type: 'clear', mode })}
           onToggleType={(typeKey) =>
             setHiddenTypes((prev) => {
@@ -777,15 +854,18 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             <div className="pointer-events-auto flex max-w-md flex-col items-center">
               <EmptyState
                 icon={Waypoints}
-                title="Search to start exploring"
-                description="Find entities and pull them onto the canvas, then expand along their relations."
+                title="Build your working graph"
+                description="Quick load existing entities and their connections, or search for a starting point."
                 action={
-                  <Button size="sm" onClick={openPalette}>
-                    <Search className="size-3.5" /> Search entities
-                    <kbd className="ml-1 rounded border border-primary-foreground/30 px-1 font-mono text-[10px]">
-                      ⌘K
-                    </kbd>
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => setQuickLoadOpen(true)}><Waypoints className="size-3.5" /> Quick load</Button>
+                    <Button size="sm" variant="outline" onClick={openPalette}>
+                      <Search className="size-3.5" /> Search entities
+                      <kbd className="ml-1 rounded border border-primary-foreground/30 px-1 font-mono text-[10px]">
+                        ⌘K
+                      </kbd>
+                    </Button>
+                  </div>
                 }
               />
               {recents.length > 0 && (
@@ -871,6 +951,13 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             }}
           />
         )}
+
+        {quickLoadOpen && <QuickLoadDialog
+          types={schema.entityTypes.filter((type) => !hiddenTypes.has(type.key))}
+          remaining={MAX_NODES - ws.nodes.length}
+          onClose={() => setQuickLoadOpen(false)}
+          onLoad={quickLoad}
+        />}
 
         <ConnectDialog
           ontologyKey={ontologyKey}

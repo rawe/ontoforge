@@ -1,5 +1,6 @@
 import {
   Eraser,
+  Box,
   Maximize,
   MessagesSquare,
   Network,
@@ -35,6 +36,7 @@ interface CanvasToolbarProps {
   pinnedCount: number
   types: readonly TypeFilterEntry[]
   onSearch: () => void
+  onQuickLoad: () => void
   onFit: () => void
   onRelayout: () => void
   onClear: (mode: 'all' | 'unpinned') => void
@@ -43,6 +45,7 @@ interface CanvasToolbarProps {
   ask?: { open: boolean; onToggle: () => void }
   /** The Hierarchy edges filter; absent when the lens has no parent relation. */
   hierarchy?: { on: boolean; onToggle: () => void }
+  view?: { mode: '2d' | '3d'; onChange: (mode: '2d' | '3d') => void }
 }
 
 /**
@@ -55,12 +58,14 @@ export function CanvasToolbar({
   pinnedCount,
   types,
   onSearch,
+  onQuickLoad,
   onFit,
   onRelayout,
   onClear,
   onToggleType,
   ask,
   hierarchy,
+  view,
 }: CanvasToolbarProps) {
   const [clearOpen, setClearOpen] = useState(false)
   const empty = nodeCount === 0
@@ -88,9 +93,16 @@ export function CanvasToolbar({
   )
 
   return (
-    <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-380px)] flex-col items-start gap-2">
-      <div className="flex items-center gap-0.5 rounded-xl border bg-card/95 p-1 shadow-md backdrop-blur-sm">
+    <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-24px)] flex-col items-start gap-2 lg:max-w-[calc(100%-380px)]">
+      <div className="flex flex-wrap items-center gap-0.5 rounded-xl border bg-card/95 p-1 shadow-md backdrop-blur-sm">
+        {view !== undefined && (
+          <div className="mr-1 flex items-center rounded-lg bg-muted/70 p-0.5" role="group" aria-label="Graph view">
+            <Button size="xs" variant={view.mode === '2d' ? 'secondary' : 'ghost'} aria-pressed={view.mode === '2d'} onClick={() => view.onChange('2d')}>2D</Button>
+            <Button size="xs" variant={view.mode === '3d' ? 'secondary' : 'ghost'} aria-pressed={view.mode === '3d'} onClick={() => view.onChange('3d')}><Box className="size-3.5" /> 3D</Button>
+          </div>
+        )}
         {iconButton('Search & add entities', <Search className="size-4" />, onSearch)}
+        <Button size="xs" variant="ghost" onClick={onQuickLoad}><Network className="size-3.5" /> Quick load</Button>
         {ask !== undefined && (
           <Tooltip>
             <TooltipTrigger asChild>

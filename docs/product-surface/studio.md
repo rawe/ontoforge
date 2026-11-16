@@ -14,27 +14,28 @@ Find [schema](#schema), [type pages](#type-page-classic-view), [lenses](#lenses)
 
 ## Schema
 
-One page for the ontology's schema, in two views of the same types: the
-[schema graph](schema-editing.md#schema-graph), which is the default, and the classic view — a two-column
+One page for the ontology's schema, in three views of the same types: the
+[schema graph](schema-editing.md#schema-graph), which is the default,
+[3D](schema-editing.md#3d-schema), and the classic view — a two-column
 list of entity types and relation types, each section with its count, plus a
 [type page](#type-page-classic-view) per type. A list card shows the type's key, display
 name, property count and description; a relation type card also shows its endpoints. The
 Studio sidebar's Schema entry is active on every schema address.
 
-Both views share one selection: at most one entity type or relation type, optionally with
+All three views share one selection: at most one entity type or relation type, optionally with
 one opened property, held in the address ([Deep links](client-contracts.md#deep-links)). Selecting anywhere —
 on the graph, in the [outline](schema-editing.md#schema-outline), the
 [command palette](schema-editing.md#schema-command-palette), the [issues list](schema-editing.md#schema-issues) or a jump
 link — replaces the address; switching views adds a history entry, so back and forward
-restore view and selection. Switching is instant and keeps the selection and the opened
-property in both directions. In the classic view a selected type is shown as its type page
+restore view and selection. Switching keeps the selection and the opened
+property across views. In the classic view a selected type is shown as its type page
 and the list when nothing is selected. An opened property's row opens, is highlighted
 briefly and scrolls into view — in the graph's inspector or on the type page. A type key
 the schema does not have shows a not-found state with a link to the list in the classic
-view; on the graph it is dropped from the address with a message naming it.
+view; in Graph and 3D it is dropped from the address with a message naming it.
 
 The header carries Validate, the issues button, a Commands button opening the schema
-command palette, and the Graph | Classic switch; in the classic view it adds
+command palette, and the Graph | 3D | Classic switch; in the classic and 3D views it adds
 "+ Entity type" and "+ Relation type", which open the create dialogs — the graph creates
 in place. Validation results appear inline as a pass marker or a list of path-and-message
 issues. Below the header sit the outline and the current view; the page itself never

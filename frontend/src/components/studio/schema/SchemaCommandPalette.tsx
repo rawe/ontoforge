@@ -16,6 +16,7 @@ import { useEffect, useEffectEvent, useState, type ReactNode } from 'react'
 import {
   ArrowRight,
   Box,
+  Boxes,
   ChevronLeft,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -222,13 +223,13 @@ function PaletteBody({ close }: { close: () => void }) {
         ]
       : []),
     { id: 'add-property', label: 'Add property to…', icon: <ListPlus />, run: () => setPage({ id: 'pick-owner' }) },
-    ...(graph
+    ...(view !== 'classic'
       ? [
           {
             id: 'focus',
             label: ws.focusMode ? 'Exit focus' : 'Focus on the selection and its neighbours',
             icon: <Crosshair />,
-            shortcut: 'F',
+            shortcut: graph ? 'F' : undefined,
             run: run(ws.toggleFocus),
           },
         ]
@@ -240,6 +241,8 @@ function PaletteBody({ close }: { close: () => void }) {
       shortcut: 'V',
       run: run(() => ws.switchView(graph ? 'classic' : 'graph')),
     },
+    ...(view !== '3d' ? [{ id: 'switch-3d', label: 'Explore in 3D', icon: <Boxes />, run: run(() => ws.switchView('3d')) }] : []),
+    ...(view === '3d' ? [{ id: 'switch-classic', label: 'Switch to Classic view', icon: <PanelTop />, run: run(() => ws.switchView('classic')) }] : []),
     ...(graph
       ? [
           {

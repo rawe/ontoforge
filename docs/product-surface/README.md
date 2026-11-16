@@ -16,6 +16,7 @@ complete on *what the product does* and deliberately silent on how it is built.
 | Start page, Studio and Workbench orientation, sign-in | [The three levels](#the-three-levels) |
 | Working with data, queries, rulesets, changesets and assistants | [Workbench screens](workbench.md) |
 | Modeling, lenses, search configuration and transfer | [Studio screens](studio.md) |
+| Flying through schema or instance graphs | [3D graph exploration](graph-3d.md) |
 | Shared controls, editors, chat and document interactions | [Finding and collecting](finding-and-collecting.md), [assistants](assistants.md), [schema and document editing](schema-editing.md) |
 | Availability, client state, links and keyboard access | [Feature gating](#feature-gating), [Client-side contracts](client-contracts.md), [Deep links](client-contracts.md#deep-links), [Keyboard surface](client-contracts.md#keyboard-surface) |
 

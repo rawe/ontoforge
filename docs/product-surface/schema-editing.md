@@ -82,9 +82,17 @@ show all properties, focus and Hierarchy; zoom controls sit at the bottom, and a
 canvas lists the gestures and keys. Escape steps back in order: the drag or popover, then
 focus mode, then the selection.
 
+## 3D schema
+
+The **3D** tab renders the same entity types and relation types in a spatial scene,
+with the outline and editable inspector alongside it. Selection and opened properties
+stay in the address across Graph, 3D and Classic. Create actions are available in the
+header and command palette. See [3D graph exploration](graph-3d.md) for navigation,
+proximity details, focus, tours and display recovery.
+
 ## Schema outline
 
-On the left of the [Schema](studio.md#schema) screen in both views: a search box, then the entity
+On the left of the [Schema](studio.md#schema) screen in all three views: a search box, then the entity
 types (colour, display name, key, issue count, property count) and the relation types
 (display name, key, source → target, issue count, property count; a parent relation with
 a dot in the parent colour naming its parent end, another one-per-pair relation type with
@@ -104,7 +112,7 @@ The outline collapses to a narrow rail, remembered per ontology; `/` opens it ag
 
 The Schema screen's own palette, distinct from the Workbench's
 [command palette](finding-and-collecting.md#command-palette). Cmd/Ctrl+K, also while typing, or the header's
-Commands button opens it in both views; each open starts at the root with an empty input.
+Commands button opens it in every view; each open starts at the root with an empty input.
 
 - **Actions** — new entity type, new relation type, add a property to the selected type
   or to a chosen one, focus, switch view, hide or show all properties and those of the

@@ -1,4 +1,6 @@
-FROM node:22.23.4-alpine AS build
+# The build output is static files, the same on every platform: build them
+# natively on the build host instead of under emulation for each target.
+FROM --platform=$BUILDPLATFORM node:22.23.4-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

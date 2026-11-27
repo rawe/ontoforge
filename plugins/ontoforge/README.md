@@ -61,6 +61,8 @@ When invoked, the skill interactively gathers requirements and generates:
 2. **`.env`** (local mode, optional) — the server's environment variables for secrets and local overrides.
 3. **`.mcp.json`** (both modes) — Claude Code MCP configuration pointing to the OntoForge modeling and runtime servers, local by default, any server when `ONTOFORGE_BASE_URL` is set.
 
+The servers speak MCP protocol revision 2026-07-28 only; Codex CLI needs its `mcp_2026_07_28` feature enabled for it. Besides tools they serve skills over MCP: the modeling server OntoForge's built-in modeling guides, each runtime server the runtime skills of its lens. The skill explains both.
+
 The skill uses bundled templates as starting points and adapts them based on user input. It never invents environment variables — only the ones recognized by OntoForge are used.
 
 ### ontoforge-runtime-api

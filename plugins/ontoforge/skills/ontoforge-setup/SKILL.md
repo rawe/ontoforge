@@ -220,3 +220,29 @@ OntoForge exposes two MCP servers, each bound to one ontology by its mount URL:
 - **Runtime**: `<baseUrl>/mcp/ontologies/<ontologyKey>/runtime/lenses/<lensKey>` — data operations through one lens
 
 If the configured ontology does not exist yet, the modeling server's argument-less `ensure_ontology` tool creates it (and no-ops when it already exists); creating ontologies under other keys, renaming, and deleting are REST/UI operations.
+
+### Client requirements
+
+Both servers speak MCP protocol revision 2026-07-28 over HTTP and no other revision. Tell
+the user when their client needs something for it:
+
+- **Claude Code** connects as it is (checked with 2.1.332).
+- **Codex CLI** connects only with its `mcp_2026_07_28` feature enabled, e.g.
+  `codex --enable mcp_2026_07_28`.
+
+### Skills served over MCP
+
+Besides tools, both servers serve skills through the MCP skills extension. A client that
+supports it lists them and loads one when a task calls for it; nothing has to be
+installed or configured in the project.
+
+- **Modeling** serves the built-in skills that ship with OntoForge: guides for designing a
+  schema (`property-or-relation`, `lens-scoping`, `search-design`, `schema-changes`).
+- **Runtime** serves the runtime skills of its lens: guides the ontology's designers wrote
+  for working with that lens's data. A lens may have none. They are maintained in the
+  Studio (lens, tab "Skills") or with the modeling server's `set_runtime_skill` tool.
+
+In Claude Code they appear under `/skills` as `<server>:<skill>`, where `<server>` is the
+entry's name in `.mcp.json`, and need version 2.1.331 or later in an interactive session;
+`claude -p` does not load MCP skills. After a skill is added or deleted, reconnect the
+server in `/mcp`.

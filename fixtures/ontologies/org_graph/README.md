@@ -4,9 +4,9 @@ Graph structure, query and lens fixture: people, teams, projects, skills and pol
 versions of the fictional engineering company Corvane Engineering. Use it for multi-hop
 traversal, self-relations, relation properties, OQL (multi-hop, aggregates, OPTIONAL
 MATCH), saved query pipelines with typed parameters, every lens scoping variant, query-path
-and relation-existence filters, and near-duplicate people for identity comparison.
-Everything except identity comparison and the agent works without any AI or embedding
-provider. All people, teams and texts are invented.
+and relation-existence filters, near-duplicate people for identity comparison, and a
+runtime skill whose review has a known result. Everything except identity comparison and
+the agent works without any AI or embedding provider. All people, teams and texts are invented.
 
 ## Schema
 
@@ -72,6 +72,39 @@ Notes on the results:
 - The order inside `collect(...)` lists is not fixed; compare them as sets.
 - A wrong parameter value is rejected per parameter (`since=not-a-date`, `min_priority=high`);
   a missing one is rejected as missing.
+
+## Runtime skill
+
+`staffing` holds one runtime skill, `staffing-gap-review`, the "Corvane staffing gap
+review". Its 4/10 rule: a required skill is covered on a project only by an active member
+who works on it at least 10 hours a week and holds the skill at proficiency 4 or higher.
+It reviews only `active` projects, names two `execute_query` OQL queries and a fixed
+report. `all`, `directory` and `management` hold no skill.
+
+Sample prompt on the `staffing` runtime MCP mount, without naming the skill: "Are
+Corvane's active projects staffed for the skills they require? Tell me which projects are
+missing which skills."
+
+Expected observation: the client loads `staffing-gap-review` by itself, runs the two
+queries and answers under the heading `Staffing gap review — rule 4/10`:
+
+| Project | Verdict | Uncovered skills | Nearest candidate |
+|---|---|---|---|
+| PRJ-ATL Atlas Gearbox Redesign | COVERED | — | — |
+| PRJ-BCN Beacon Telemetry Platform | COVERED | — | — |
+| PRJ-CBT Cobalt Test Rig Automation | GAP | Embedded C | Jonas Petersen (proficiency 3, 12 h/week) |
+| PRJ-DLT Delta Firmware Update Service | GAP | Rust | Marcus Webb (proficiency 4, 4 h/week) |
+| PRJ-GRN Granite Cost Model | COVERED | — | — |
+
+followed by `Not reviewed: PRJ-EMB (planned), PRJ-FJD (completed), PRJ-HBR (on_hold)` and
+`Result: 2 of 5 active projects have a gap.`
+
+Every required skill of an active project is held by at least one of its members, so both
+gaps come from the rule alone: on Cobalt, Embedded C is held by Jonas Petersen
+(proficiency 3, 12 h) and Liam O'Connor (2, 30 h); on Delta, Rust by Marcus Webb (4, but
+4 h), Benedikt Sommer (3, 32 h) and Isabel Moreau (no proficiency, no hours). To check that
+an edited skill is picked up, change the rule to proficiency 3: Jonas Petersen and
+Benedikt Sommer then close both gaps, and the result is 0 of 5.
 
 ## Data
 

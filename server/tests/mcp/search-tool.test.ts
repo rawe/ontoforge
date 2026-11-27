@@ -7,10 +7,10 @@
  * catalog. The services are stubbed; an in-memory client calls the tools.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { connectServer } from "../mcpClient.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 
 const stubs = vi.hoisted(() => ({
@@ -49,10 +49,7 @@ beforeEach(async () => {
     embed: async () => [1, 0],
     embedBatch: async (texts) => texts.map(() => [1, 0]),
   });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await createRuntimeMcpServer("onto", "all").connect(serverTransport);
-  client = new Client({ name: "search-tool-tests", version: "0.0.1" });
-  await client.connect(clientTransport);
+  client = await connectServer("search-tool-tests", () => createRuntimeMcpServer("onto", "all"));
 });
 
 afterEach(async () => {

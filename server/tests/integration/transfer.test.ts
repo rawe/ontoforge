@@ -22,11 +22,11 @@
 
 import { readFileSync } from "node:fs";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
@@ -428,7 +428,7 @@ describe("the parent end", () => {
 describe("modeling MCP transfer pair", () => {
   // The mount is bound to the ontology its URL names (test_ont here).
   async function connect(): Promise<Client> {
-    const client = new Client({ name: "session-10-tests", version: "0.0.1" });
+    const client = mcpClient("session-10-tests");
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/test_ont/model`)));
     return client;
   }

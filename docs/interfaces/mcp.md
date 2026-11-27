@@ -1,8 +1,8 @@
 # MCP
 
 Two servers, mounted in the same process as REST and calling the same services directly.
-Both use stateless HTTP with plain JSON responses, so one mount serves many clients and
-no connection carries state. The deployment and transport choice is explained in
+Both speak MCP protocol revision 2026-07-28, and only that revision, over stateless HTTP
+with plain JSON responses, so one mount serves many clients and no connection carries state. The deployment and transport choice is explained in
 [ADR 0005](../adr/0005-mcp-in-process-stateless-http.md). Modeling and runtime remain separate
 servers: no client reaches both through one MCP connection.
 

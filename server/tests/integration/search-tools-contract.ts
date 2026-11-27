@@ -9,10 +9,9 @@
  * builds asynchronously: every search first drains the queued work. An
  * in-memory client calls the tools.
  */
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { connectServer } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { initStores, closeStores } from "../../src/core/ports.js";
 import { getEmbeddingProvider, setEmbeddingProvider } from "../../src/core/embedding.js";
@@ -72,10 +71,7 @@ export function searchToolsContract(embedding: boolean, enabled = true) {
   /** One tool call through the lens, after the worker built what is queued. */
   async function call(name: string, args: Record<string, unknown>, lens = "all") {
     await drainSearchWork();
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await createRuntimeMcpServer("search_test", lens).connect(serverTransport);
-    const client = new Client({ name: "search-tools-contract", version: "0.0.1" });
-    await client.connect(clientTransport);
+    const client = await connectServer("search-tools-contract", () => createRuntimeMcpServer("search_test", lens));
     try {
       const result = (await client.callTool({ name, arguments: args })) as {
         content: { text: string }[];

@@ -12,12 +12,12 @@
 import { randomUUID } from "node:crypto";
 
 import { AIMessage } from "@langchain/core/messages";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import type { AccessStore } from "../../src/access/store.js";
 import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { createApp } from "../../src/app.js";
@@ -84,7 +84,7 @@ async function idOf(subject: string): Promise<string> {
 
 /** An MCP client on `path` as `subject`. */
 async function mcpAs(subject: string, path: string): Promise<Client> {
-  const client = new Client({ name: "access-tests", version: "0.0.1" });
+  const client = mcpClient("access-tests");
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`), {
       requestInit: { headers: { authorization: bearer(subject) } },
@@ -355,7 +355,7 @@ describe("authorization with authentication on", () => {
 
   it("a Reader's runtime MCP mount lists only reads and refuses a write call", async () => {
     const connect = async (subject: string) => {
-      const client = new Client({ name: "access-tests", version: "0.0.1" });
+      const client = mcpClient("access-tests");
       await client.connect(
         new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/fair/runtime/lenses/visitor`), {
           requestInit: { headers: { authorization: bearer(subject) } },

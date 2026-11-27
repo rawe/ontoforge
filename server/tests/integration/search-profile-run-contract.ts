@@ -10,11 +10,11 @@
  * person (status, bio) —works_for→ company (city). Ada's bio names the
  * engine, Bob's the garden and the engine; Ada is active, Bob retired.
  */
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
@@ -323,7 +323,7 @@ export function searchProfileRunContract(embedding: boolean, enabled = true) {
     });
 
     it("MCP lists and runs them, read-only", async () => {
-      const client = new Client({ name: "search-profile-run-tests", version: "0.0.1" });
+      const client = mcpClient("search-profile-run-tests");
       await client.connect(
         new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/all`)),
       );

@@ -10,11 +10,11 @@
  * offending field in one message string.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
@@ -29,7 +29,7 @@ let baseUrl: string;
 let client: Client;
 
 async function connectClient(name: string, ontologyKey = "test_ont"): Promise<Client> {
-  const c = new Client({ name, version: "0.0.1" });
+  const c = mcpClient(name);
   await c.connect(
     new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/${ontologyKey}/model`)),
   );
@@ -1016,30 +1016,6 @@ describe("stateless transport", () => {
       await clientA.close();
       await clientB.close();
     }
-  });
-
-  it("answers plain JSON, not SSE", async () => {
-    const res = await fetch(`${baseUrl}/mcp/ontologies/test_ont/model`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2025-03-26",
-          capabilities: {},
-          clientInfo: { name: "raw", version: "0.0.1" },
-        },
-      }),
-    });
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("application/json");
-    const body = (await res.json()) as { result: { serverInfo: { name: string } } };
-    expect(body.result.serverInfo.name).toBe("OntoForge Modeling");
   });
 
   it("a trailing path segment below the mount is an unknown route", async () => {

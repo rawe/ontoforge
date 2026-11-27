@@ -21,7 +21,7 @@ export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const KEYCLOAK_URL = 'http://localhost:8180';
 export const ISSUER = `${KEYCLOAK_URL}/realms/ontoforge`;
 export const AUDIENCE = 'ontoforge-api';
-const SDK = join(ROOT, 'server', 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm');
+const MCP_CLIENT = join(ROOT, 'server', 'node_modules', '@modelcontextprotocol', 'client', 'dist', 'index.mjs');
 
 // --- Secrets -----------------------------------------------------------------
 
@@ -519,9 +519,7 @@ export async function authorizationRequest(publicUrl, { clientId = 'ontoforge-cl
  * Answers {client, authorizationUrl, consent, tokens(), close}.
  */
 export async function connectMcp(serverUrl, username, { clientId = 'ontoforge-cli' } = {}) {
-  const { Client } = await import(pathToFileURL(join(SDK, 'client', 'index.js')).href);
-  const { StreamableHTTPClientTransport } = await import(pathToFileURL(join(SDK, 'client', 'streamableHttp.js')).href);
-  const { UnauthorizedError } = await import(pathToFileURL(join(SDK, 'client', 'auth.js')).href);
+  const { Client, StreamableHTTPClientTransport, UnauthorizedError } = await import(pathToFileURL(MCP_CLIENT).href);
 
   // The loopback listener the authorization server redirects to.
   let receive;
@@ -550,7 +548,7 @@ export async function connectMcp(serverUrl, username, { clientId = 'ontoforge-cl
     codeVerifier: () => store.verifier,
   };
   const transportOptions = { authProvider: provider };
-  const client = new Client({ name: 'ontoforge-e2e', version: '1.0.0' });
+  const client = new Client({ name: 'ontoforge-e2e', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   const close = async () => {
     await client.close().catch(() => {});
     listener.close();
@@ -567,9 +565,8 @@ export async function connectMcp(serverUrl, username, { clientId = 'ontoforge-cl
     if (outcome.redirect === null) throw new Error(`authorization stopped at a page: HTTP ${outcome.page?.status} ${outcome.page?.message}`);
     await fetch(outcome.redirect); // the browser following the redirect to the loopback listener
     const callback = await received;
-    const code = callback.searchParams.get('code');
-    if (!code) throw new Error(`authorization returned no code (${callback.searchParams.get('error') ?? 'no error'})`);
-    await first.finishAuth(code);
+    if (!callback.searchParams.get('code')) throw new Error(`authorization returned no code (${callback.searchParams.get('error') ?? 'no error'})`);
+    await first.finishAuth(callback.searchParams);
     await client.connect(new StreamableHTTPClientTransport(new URL(serverUrl), transportOptions));
     return { client, authorizationUrl, consent: outcome.consent, tokens: () => store.tokens, close };
   } catch (error) {

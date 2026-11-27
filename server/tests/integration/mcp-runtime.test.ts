@@ -11,11 +11,11 @@
  * mount `…/rulesets/:rulesetKey` with `get_ruleset` and its not-found order.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
@@ -33,7 +33,7 @@ let app: FastifyInstance;
 let baseUrl: string;
 
 async function connectClient(url: string, headers?: Record<string, string>): Promise<Client> {
-  const client = new Client({ name: "runtime-mcp-tests", version: "0.0.1" });
+  const client = mcpClient("runtime-mcp-tests");
   await client.connect(
     new StreamableHTTPClientTransport(new URL(url), {
       requestInit: headers ? { headers } : undefined,

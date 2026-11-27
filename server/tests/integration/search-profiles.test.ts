@@ -7,11 +7,11 @@
  * import whose tree the imported lens cannot run writing nothing.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { buildFixture, createOntology, modelPrefix } from "./fixture.js";
@@ -121,7 +121,7 @@ describe("modeling REST", () => {
 
 describe("modeling MCP", () => {
   it("set_search_profile, list_search_profiles and delete_search_profile", async () => {
-    const client = new Client({ name: "search-profiles-tests", version: "0.0.1" });
+    const client = mcpClient("search-profiles-tests");
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/test_ont/model`)));
     type Result = { content: { text: string }[]; isError?: boolean };
     const call = async (name: string, args: Row) => (await client.callTool({ name, arguments: args })) as unknown as Result;

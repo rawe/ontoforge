@@ -6,11 +6,11 @@
  * unavailable.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../../mcpClient.js";
 import { createApp } from "../../../src/app.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
@@ -78,7 +78,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     // Search entries are built in the background.
     await drainSearchWork();
 
-    client = new Client({ name: "semantic-search-mcp-tests", version: "0.0.1" });
+    client = mcpClient("semantic-search-mcp-tests");
     await client.connect(
       new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/mcp_search`)),
     );

@@ -9,11 +9,11 @@
  * leaves out answers the write access refusal.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { connectServer, mcpRequest } from "../mcpClient.js";
 import type { RulesetRecord } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { createMockRuntimeStore, makeEntity, makeFullSchema, type MockRuntimeStore } from "./helpers.js";
@@ -190,12 +190,8 @@ describe("the ruleset through the lens", () => {
 
 describe("the ruleset MCP server", () => {
   async function connect(rulesetKey: string | null, lensKey = "all"): Promise<Client> {
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const binding = rulesetKey === null ? undefined : { rulesetKey, writeAccess: "full" as const };
-    await createRuntimeMcpServer("test_ont", lensKey, binding).connect(serverTransport);
-    const client = new Client({ name: "ruleset-mount-tests", version: "0.0.1" });
-    await client.connect(clientTransport);
-    return client;
+    return connectServer("ruleset-mount-tests", () => createRuntimeMcpServer("test_ont", lensKey, binding));
   }
 
   interface ToolCallResult {
@@ -315,12 +311,7 @@ describe("the MCP ruleset mount over HTTP", () => {
   const MOUNT = "/mcp/ontologies/test_ont/runtime/lenses/all/rulesets/agent-a";
   /** One stateless JSON-RPC request to the mount. */
   const rpc = async (method: string, params: Record<string, unknown> = {}) => {
-    const res = await app.inject({
-      method: "POST",
-      url: MOUNT,
-      headers: { accept: "application/json, text/event-stream", "content-type": "application/json" },
-      payload: { jsonrpc: "2.0", id: 1, method, params },
-    });
+    const res = await app.inject({ method: "POST", url: MOUNT, ...mcpRequest(method, params) });
     expect(res.statusCode, res.body).toBe(200);
     return res.json().result;
   };

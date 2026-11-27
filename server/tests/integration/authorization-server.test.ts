@@ -13,6 +13,7 @@ import type { FastifyInstance } from "fastify";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpRequest } from "../mcpClient.js";
 import type { AccessStore } from "../../src/access/store.js";
 import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { createApp } from "../../src/app.js";
@@ -116,12 +117,8 @@ async function call(app: FastifyInstance, authorization: string, method: string,
 const admin = (method: string, url: string, payload?: object) => call(a, "Bearer jwt.admin.sig", method, url, payload);
 
 async function toolsList(app: FastifyInstance, path: string, accessToken: string) {
-  const res = await app.inject({
-    method: "POST",
-    url: path,
-    headers: { authorization: `Bearer ${accessToken}`, accept: "application/json, text/event-stream", "content-type": "application/json" },
-    payload: { jsonrpc: "2.0", id: 1, method: "tools/list" },
-  });
+  const { headers, payload } = mcpRequest("tools/list");
+  const res = await app.inject({ method: "POST", url: path, headers: { ...headers, authorization: `Bearer ${accessToken}` }, payload });
   return { status: res.statusCode, body: res.body, headers: res.headers };
 }
 

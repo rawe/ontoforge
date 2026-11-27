@@ -30,7 +30,7 @@ what the lens shows:
 | none | none | all | all |
 | some | none | the included ones | inferred: every relation type whose source and target are both shown |
 | none | some | all | the included ones |
-| some | some | the included ones | the included ones |
+| some | some | the included ones | the included ones with both endpoints shown |
 
 **Prefer entity inclusions alone.** Naming entity types yields a coherent subgraph: the
 relation types between them follow on their own, including ones added later.
@@ -54,8 +54,8 @@ every relation type the lens needs.
   succeed. Identity properties must be in it too, or the type has no identity through
   the lens.
 - A lens with allowlists is what the cascade protocol defends: adding a required property
-  without a default, or setting an identity, is refused until \`cascade\` adds the key to
-  every allowlist for that type.
+  without a default, or setting an identity, is refused while an allowlist for that type
+  omits the key; \`cascade\` adds it.
 - Only an inclusion carries an allowlist. With entity inclusions alone, inferred relation
   types always show all their properties.
 - To change an allowlist, call \`add_entity_type_to_lens\` or \`add_relation_type_to_lens\`
@@ -63,8 +63,9 @@ every relation type the lens needs.
 
 ## Search through the lens
 
-An unscoped lens searches every search index. A scoped lens searches only the indices it
-includes, and each only while it shows the index's root entity type.
+No lens searches a switched-off managed index. Otherwise an unscoped lens searches every
+index; a scoped lens only the indices it includes, each only while it shows the index's
+root entity type.
 
 - A managed index that comes into existence later is included automatically in every
   scoped lens that shows its root type (a passage index only where its document property
@@ -79,7 +80,7 @@ includes, and each only while it shows the index's root entity type.
 
 ## A safe order of calls
 
-1. \`get_schema\` to see the types, properties, existing lenses and indices.
+1. \`get_schema\` for the types, properties and lenses; \`list_search_indices\` for the indices.
 2. \`create_lens\` with \`key\`, \`name\` and a \`description\` stating the audience.
 3. \`add_entity_type_to_lens\` for each entity type, with \`properties\` only where you hide
    something.
@@ -88,8 +89,8 @@ includes, and each only while it shows the index's root entity type.
    endpoint check is skipped, and the lens can end up invalid.
 5. \`add_search_index_to_lens\` for each index the lens should search, for example
    \`<entityTypeKey>~default\`.
-6. \`validate_lens\`: errors make the lens invalid; warnings name included indices the lens
-   cannot search and properties an index reads that the lens hides.
+6. \`validate_lens\`: errors make the lens invalid; warnings name included indices whose
+   root type the lens hides and properties an index reads that the lens hides.
 
 Retrievers, saved queries and search profiles belong to one lens and are checked against
 what it shows: narrowing the lens can leave a stored one invalid, and nothing repairs it.

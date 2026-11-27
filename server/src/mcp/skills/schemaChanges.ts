@@ -31,9 +31,10 @@ end and \`one_per_pair\`. A description can be replaced but not cleared.
 ## Deleting leaves data behind
 
 \`delete_entity_type\` and \`delete_relation_type\` delete the definition, not the entities
-or relations stored under it. Those stay stored but unreachable: no lens shows them and
-no tool can list or remove them, short of deleting the ontology. Delete or move the data
-first, through a lens, while the type still exists.
+or relations stored under it. Those stay stored, hidden from every lens, until a type is
+created again under the same key; meanwhile no tool can list or remove them, short of
+deleting the ontology. Delete or move the data first, through a lens, while the type
+still exists.
 
 Order of deletes:
 
@@ -46,9 +47,8 @@ Order of deletes:
 
 ## Cascade consent
 
-A change that would break a scoped lens or a custom search index is refused, naming the
-affected lenses and indices. Repeating it with \`cascade\` true consents, and the server
-repairs them:
+A change that would break a lens or a custom search index is refused, saying what it
+would break. Repeating it with \`cascade\` true consents, and the server repairs them:
 
 | Change | Refused when | \`cascade\` does |
 |---|---|---|
@@ -60,14 +60,15 @@ repairs them:
 | identity set (\`create_entity_type\`, \`update_entity_type\`) | a listed property is optional or has a default, or an allowlist omits it | makes them required without default, adds them to allowlists |
 
 Read the refusal before consenting: an index left with no field and no group is deleted
-with its lens inclusions. Unscoped lenses and managed indices never block a change.
+with its lens inclusions. Managed indices never block a change.
 
 ## Changes nothing checks
 
 - Making an existing property required, or removing a required property's default, with
-  \`update_property\` is never refused, even when a lens allowlist omits it. Creates through
-  that lens then fail. Run \`validate_schema\` afterwards and fix the allowlists with
-  \`add_entity_type_to_lens\`.
+  \`update_property\` is never refused, even when a lens allowlist omits it. That lens then
+  validates as invalid, and creates through it succeed without the value. Run
+  \`validate_schema\` afterwards and fix the allowlists with \`add_entity_type_to_lens\` or
+  \`add_relation_type_to_lens\`.
 - Deleting a property that only lens allowlists name is not refused: the allowlists keep
   a key that matches nothing. \`cascade\` cleans them up.
 - Retrievers, saved queries and search profiles are not repaired by any cascade. A
@@ -77,7 +78,8 @@ with its lens inclusions. Unscoped lenses and managed indices never block a chan
 
 Setting an identity, a \`parent\` end or \`one_per_pair\` is checked against the data already
 stored. A violation refuses the change, naming what breaks; repair the data first, no
-consent overrides it. Clearing either relation rule is never refused.
+consent overrides it. Clearing a relation rule is never refused, but a parent relation is
+always one per pair: clear \`parent\` before \`one_per_pair\`.
 
 Finish every restructuring with \`validate_schema\`.
 `;

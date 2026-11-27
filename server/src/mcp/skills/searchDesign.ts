@@ -19,7 +19,7 @@ hit is an entity of the root type. A lens decides which indices its callers sear
 
 They follow the schema with no configuration. Switch off one that only adds noise with
 \`set_search_settings\` \`disabled_indices\` (it lists every managed index to switch off;
-the rest are on). Set \`keyword_languages\` to the languages the data is written in.
+the rest are on). Set \`keyword_languages\` (\`english\`, \`german\` or both) to match the data.
 
 ## When a custom index pays off
 
@@ -40,8 +40,8 @@ for:
 
 - **One entry per relation instance.** A relation group yields one entry per relation,
   with that relation's \`fields\` and the \`target\` entity's fields. An entry never combines
-  two relations. A question spanning two relations is answered by an exact filter or by
-  fusing two rankings at entity level, not by one entry.
+  two relations. A question that needs two relations at once needs an exact filter:
+  fusing two rankings also ranks entities that match only one.
 - **One hop.** A group follows one relation type in one \`direction\` from the root:
   \`outgoing\` when the root is the relation type's source, \`incoming\` when it is its target.
 - **Costs grow with relations.** Each group multiplies entries, and changes to related
@@ -50,8 +50,9 @@ for:
 - **Header.** By default every relation and passage entry starts with the root's name
   property, so the entry says whose it is. Set \`header\` to other own fields, or \`[]\` for
   none.
-- **Templates.** \`{x}\` is a field, \`{target.x}\` a target field. A clause whose placeholder
-  has no value is dropped up to the next \`,\`, \`;\`, \`.\` or line break. Placeholders are not
+- **Templates.** A template replaces the whole semantic entry, header and label included;
+  keyword entries ignore it. \`{x}\` is a field, \`{target.x}\` a target field. A clause
+  whose placeholder has no value is dropped up to the next \`,\`, \`;\`, \`.\` or line break. Placeholders are not
   validated: a misspelt one silently never has a value, so check the outline.
 - **Description.** Write \`description\` for whoever picks an index to search: what it
   finds and by which facts.
@@ -80,11 +81,13 @@ Example:
    \`⟦root.x⟧\`, \`⟦relation.x⟧\`, \`⟦target.x⟧\` and \`⟦passage⟧\` show which field lands where.
    Check \`estimate\` for the build cost per representation.
 2. \`create_search_index\`. Building runs in the background; \`get_search_index_status\`
-   until \`state\` is \`ready\`. A new entity is searchable only once its entries are built.
+   while \`state\` is \`building\` or \`stale\`. A new entity is searchable only once its
+   entries are built.
 3. For each scoped lens that should search it: \`add_search_index_to_lens\`, then
    \`validate_lens\` for warnings about hidden fields.
 4. To change it: \`update_search_index\` with the whole definition. Only touched
-   representations rebuild; the current entries serve until then.
+   representations rebuild, their current entries serving until then; one switched off
+   is dropped at once.
 
 ## Packaging search for callers
 
@@ -124,7 +127,8 @@ texts may differ (\`"$query"\` and \`"$query employer"\`).
     "input": {"kind": "semanticSearch", "index": "person~bio", "text": "$query"}}}
   \`\`\`
 
-- **Several indices, one method and text**: \`merge\` the search nodes, then group. Different
+- **Several indices, one method and text** (keyword: one \`match\` too): \`merge\` the search
+  nodes, then group. Different
   methods or texts: group each, then \`fuse\`.
 - **A stored filter**: wrap a ranking in \`restrict\` with one \`filter\` per entity type,
   for example \`{"kind": "restrict", "input": <ranking>, "filters": [{"kind": "filter",

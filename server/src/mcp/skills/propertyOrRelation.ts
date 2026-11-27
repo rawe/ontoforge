@@ -62,10 +62,11 @@ whose inclusion lists properties, a new required property without a default need
 
 **As a relation:**
 
-1. \`create_entity_type\` for the target if none fits. It gets its \`string\` name
-   property \`name\`, which also identifies its entities for data loads unless you choose
-   another key: for a separate natural key, \`add_property\` first, then
-   \`update_entity_type\` with \`identity_properties\`.
+1. \`create_entity_type\` for the target if none fits. Its \`string\` name property
+   \`name\` only labels entities; the type has no identity until you declare one. For
+   loads that address entities by a natural key, set \`identity_properties\` with
+   \`cascade\`: on \`create_entity_type\` for \`name\`, or on \`update_entity_type\` after
+   \`add_property\`.
 2. \`create_relation_type\` with \`key\`, \`display_name\`, \`source_entity_type_key\`,
    \`target_entity_type_key\`. Turn \`one_per_pair\` on for a plain link such as membership
    or location. Set \`parent\` (\`source\` or \`target\`) only for a containment hierarchy:

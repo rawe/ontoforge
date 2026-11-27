@@ -442,7 +442,7 @@ describe("modeling MCP transfer pair", () => {
     return JSON.parse(result.content[0]!.text) as Row;
   }
 
-  it("get_schema and export_schema both return exactly the REST export payload", async () => {
+  it("export_schema returns exactly the REST export payload, get_schema the same without runtime skills", async () => {
     await importInto("test_ont", EXPORT_FIXTURE);
     const rest = await exportFrom("test_ont");
 
@@ -450,8 +450,9 @@ describe("modeling MCP transfer pair", () => {
     try {
       const viaGetSchema = await callJson(client, "get_schema");
       const viaExport = await callJson(client, "export_schema");
-      expect(viaGetSchema).toEqual(rest);
       expect(viaExport).toEqual(rest);
+      const lenses = (rest.lenses as Row[]).map(({ skills: _skills, ...lens }) => lens);
+      expect(viaGetSchema).toEqual({ ...rest, lenses });
     } finally {
       await client.close();
     }

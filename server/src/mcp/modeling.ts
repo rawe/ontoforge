@@ -126,6 +126,12 @@ export function formatToolError(error: unknown): string {
  * `listChanged: false` keeps clients from opening a change stream. */
 export const SERVER_OPTIONS: McpServerOptions = { capabilities: { tools: { listChanged: false } } };
 
+/** The modeling server also serves resources, the built-in skills' files,
+ * and they do not change either. */
+const MODELING_OPTIONS: McpServerOptions = {
+  capabilities: { ...SERVER_OPTIONS.capabilities, resources: { listChanged: false } },
+};
+
 interface ToolResult {
   content: { type: "text"; text: string }[];
   isError?: boolean;
@@ -264,7 +270,7 @@ const SEARCH_INDEX_RECORD =
  * is created over REST, where its creator becomes its administrator.
  */
 export function createModelingMcpServer(ontologyKey: string, actor: AccessActor | null = null): McpServer {
-  const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" }, SERVER_OPTIONS);
+  const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" }, MODELING_OPTIONS);
   builtInSkills.attach(server);
   const authentication = actor !== null;
 

@@ -22,7 +22,7 @@ Answer each question for the value in question.
   location, a budget), now or soon? Yes points to an entity type and a relation.
 - **R2 Shared.** Do many entities point at the same thing, so that renaming or
   correcting it once must change it for all? Yes points to a relation.
-- **R3 More than one.** Can one entity have several of them? A property holds exactly
+- **R3 More than one.** Can one entity have several of them? A property holds at most
   one value: yes means a relation.
 - **R4 Data on the link.** Does the connection itself carry facts (since when, in which
   role, what share)? Yes means a relation with properties on the relation type.
@@ -34,9 +34,9 @@ Answer each question for the value in question.
 - **P2 Plain descriptor.** Is it a measurement, date, code, flag, label or free text
   that describes only this entity and means nothing on its own? Yes means a property.
 
-**Verdict rule.** Two or more R answers yes: model a relation. Only P answers yes:
-model a property. One R answer yes: weigh it against P1; a hard need for \`required\`
-keeps a property. When you explain a decision, list the questions that decided it,
+**Verdict rule.** R3 or R4 yes: model a relation, whatever else holds. Otherwise two or
+more R answers yes: model a relation. Only P answers yes: model a property. One of R1,
+R2 or R5 yes: weigh it against P1; a hard need for \`required\` keeps a property. When you explain a decision, list the questions that decided it,
 for example "Verdict: relation (R1, R2, R5)".
 
 ## Trade-offs to state
@@ -45,7 +45,7 @@ for example "Verdict: relation (R1, R2, R5)".
 |---|---|---|
 | Enforcement | \`required\` and a default are possible; values are coerced to the data type, never checked against a list | no "must have one"; \`one_per_pair\` stops linking the same pair twice; a parent relation allows at most one parent per entity |
 | Fixed value sets | a \`string\` accepts any text, so typos become new values | the allowed values are the target's entities, created once and linked |
-| Filtering and search | filter and rank on the entity's own value | filter through a query path: \`<relationTypeKey>.<propertyKey>\` for the related entity's property, \`<relationTypeKey>@<propertyKey>\` for the relation's own; find entities without one with the relation existence filter \`<relationTypeKey>__missing\` |
+| Filtering and search | filter on the entity's own value | filter through a query path: \`<relationTypeKey>.<propertyKey>\` for the related entity's property, \`<relationTypeKey>@<propertyKey>\` for the relation's own; find entities without one with the relation existence filter \`<relationTypeKey>__missing\`; a relation type from an entity type to itself needs a direction, \`<relationTypeKey>:out\` or \`:in\` |
 | Writes | one entity update | create or delete a relation; the target entity must exist first |
 | Lenses | an inclusion's property list can hide it | the relation type and the target entity type are included or hidden on their own |
 | Long text | a \`document\` property, on entity types only | not on relation types: a relation's properties cannot be documents |
@@ -63,16 +63,19 @@ whose inclusion lists properties, a new required property without a default need
 **As a relation:**
 
 1. \`create_entity_type\` for the target if none fits. It gets its \`string\` name
-   property \`name\`; set \`identity_properties\` when the target's entities have a natural
-   unique key, so data loads can find them again.
+   property \`name\`, which also identifies its entities for data loads unless you choose
+   another key: for a separate natural key, \`add_property\` first, then
+   \`update_entity_type\` with \`identity_properties\`.
 2. \`create_relation_type\` with \`key\`, \`display_name\`, \`source_entity_type_key\`,
    \`target_entity_type_key\`. Turn \`one_per_pair\` on for a plain link such as membership
    or location. Set \`parent\` (\`source\` or \`target\`) only for a containment hierarchy:
    each entity has at most one parent across all parent relations.
 3. \`add_property\` with \`type_kind\` \`relation_type\` for facts that belong to the link
    (R4).
-4. Scoped lenses see nothing new until you include it: \`add_entity_type_to_lens\` and
-   \`add_relation_type_to_lens\`. An unscoped lens shows it at once.
+4. An unscoped lens shows the new types at once. On a scoped lens, read the lens
+   first and add only what is missing: a lens that lists entity types but no relation
+   types already shows every relation type between them, and a first
+   \`add_relation_type_to_lens\` hides the others. The skill \`lens-scoping\` has the rules.
 5. \`validate_schema\` at the end.
 
 ## Examples

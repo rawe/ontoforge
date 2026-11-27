@@ -101,6 +101,7 @@ describe("the built-in skills", () => {
   it("are served on the modeling mount", async () => {
     const discovered = await post(MOUNTS.modeling, "server/discover");
     expect(discovered.body.result.capabilities.extensions).toHaveProperty([SKILLS]);
+    expect(discovered.body.result.capabilities.resources).toEqual({ listChanged: false });
     const listed = await post(MOUNTS.modeling, "skills/list");
     expect(listed.status).toBe(200);
     expect(listed.type).toContain("application/json");

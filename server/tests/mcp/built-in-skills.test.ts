@@ -54,6 +54,27 @@ describe("the modeling server", () => {
     const read = await client.readResource({ uri: SKILL });
     expect(read.contents[0]).toMatchObject({ uri: SKILL, text: file.text });
   });
+
+  it("serves every shipped skill: named after its directory, described, readable and within the client's file limit", async () => {
+    client = await connectServer("skills-tests", () => createModelingMcpServer("test_ont"));
+    const skills = new SkillsClient(client);
+    const { skills: listed } = await skills.list();
+    expect(listed.map((skill) => skill.frontmatter.name).sort()).toEqual(
+      ["lens-scoping", "property-or-relation", "schema-changes", "search-design"],
+    );
+    for (const entry of listed) {
+      const name = entry.frontmatter.name;
+      const uri = `skill://${name}/SKILL.md`;
+      expect(entry.uri, name).toBe(uri);
+      expect(entry.frontmatter.description, name).toBeTruthy();
+      const { skill } = await skills.get(uri);
+      const file = await skills.read(skill);
+      expect(file.verified, name).toBe(true);
+      expect(file.body, name).toMatch(/^# /m);
+      // Claude Code reads at most 100 KB of one text file.
+      expect(file.bytes.byteLength, name).toBeLessThan(100 * 1024);
+    }
+  });
 });
 
 describe("a runtime server", () => {

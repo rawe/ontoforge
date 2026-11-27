@@ -117,7 +117,10 @@ the Ontology Administrator the tools need.
 
 | Skill | Guides |
 |---|---|
+| `lens-scoping` | Designing a lens: unscoped or scoped, the scoping matrix, property allowlists, search-index inclusions and a safe order of calls |
 | `property-or-relation` | Whether a value becomes a property or a relation to an entity type of its own: a checklist, the trade-offs, and the modeling tool calls for each choice |
+| `schema-changes` | Changing an existing schema: what never changes and how to work around it, what deleting leaves behind, cascade consent and the changes nothing checks |
+| `search-design` | Making data findable: managed or custom search indices, relation groups, header and templates, and search profiles, retrievers and saved queries, with examples |
 
 ## Runtime tools
 

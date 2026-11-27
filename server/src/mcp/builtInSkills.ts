@@ -9,10 +9,16 @@
 
 import { memorySkillFiles, SkillsExtension } from "@modelcontextprotocol/server/ext/skills";
 
+import lensScoping from "./skills/lensScoping.js";
 import propertyOrRelation from "./skills/propertyOrRelation.js";
+import schemaChanges from "./skills/schemaChanges.js";
+import searchDesign from "./skills/searchDesign.js";
 
 const files: Record<string, string> = {
+  "lens-scoping/SKILL.md": lensScoping,
   "property-or-relation/SKILL.md": propertyOrRelation,
+  "schema-changes/SKILL.md": schemaChanges,
+  "search-design/SKILL.md": searchDesign,
 };
 
 export const builtInSkills = await SkillsExtension.load(memorySkillFiles(files), { strict: true });

@@ -1347,10 +1347,8 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "receives. threshold (optional) — the cosine similarity a semantic match must reach, " +
         `-1 to 1, default ${DEFAULT_THRESHOLD}. answerFieldCharacters (optional) — characters of one ` +
         `answer field passed to the answer model, 100 to 2000, default ${DEFAULT_ANSWER_FIELD_CHARACTERS}. ` +
-        "Example: {indices: [{index: 'person~default'}], filters: [{id: 'city', entityType: " +
-        "'person', path: [{relationTypeKey: 'lives_in', direction: 'outgoing'}], field: 'name'}], " +
-        "answerFields: {person: ['name', 'email']}}. The configuration is checked against the " +
-        "lens; an invalid one is refused with every error at once and nothing is saved.",
+        "The configuration is checked against the lens; an invalid one is refused with every " +
+        "error at once and nothing is saved.",
       inputSchema: z.object({
         lens_key: z.string(),
         key: z.string(),
@@ -1438,10 +1436,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' " +
         "which collects that field from all rows of a previous step's output into a list. " +
         "Parameters define top-level $param placeholders. " +
-        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). " +
-        "Example: steps=[{name:'skills', type:'search', types:['skill'], query:'$q', limit:5}, " +
-        "{name:'results', type:'oql', oql:'MATCH (p:person)-[:has_skill]->(s:skill) " +
-        "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
+        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime).",
       inputSchema: z.object({
         lens_key: z.string(),
         key: z.string(),
@@ -1530,10 +1525,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "cut {input, limit: 1-100, perEntity?}: the first limit items, perEntity passages per entity at most. " +
         "Every search node needs a cut above it; the root ranks entities or passages. '$query' in a search " +
         "node's text marks where the query goes; at least one text holds it. Indices must be searchable and " +
-        "types shown in the lens. Checked on save, every violation at its path (tree.input.inputs.0.index). " +
-        "Example: {kind:'cut', limit:10, input:{kind:'fuse', inputs:[{kind:'group', key:'entity', " +
-        "input:{kind:'keywordSearch', index:'person~default', text:'$query'}}, {kind:'group', key:'entity', " +
-        "input:{kind:'semanticSearch', index:'person~default', text:'$query'}}]}}",
+        "types shown in the lens. Checked on save, every violation at its path (tree.input.inputs.0.index).",
       inputSchema: z.object({
         lens_key: z.string(),
         key: z.string(),

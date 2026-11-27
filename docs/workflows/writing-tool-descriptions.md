@@ -13,6 +13,11 @@ never defer one to another tool. Tools are loaded and enabled individually, so a
 description that relies on another tool becomes incomplete when that tool is absent.
 Another tool may be named as a next step, provided it is available on that surface.
 
+A modeling tool's description holds this operation contract and nothing else. Advice on
+choosing a modeling approach, trade-offs, design examples and workflows across several
+tools belongs in a [built-in skill](../interfaces/mcp.md#skills), grouped by modeler task.
+A description never depends on a skill: a client may not load skills at all.
+
 A rule that concerns one parameter may stand in that parameter's own description in the
 tool's schema: it is part of the same tool. Every parameter of an agent tool carries one,
 because a small model reads the schema before the prose. An agent tool's description is

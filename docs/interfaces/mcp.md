@@ -10,7 +10,7 @@ servers: no client reaches both through one MCP connection.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 34; 35 on a ruleset mount, 34 with write access `propose`, 19 with `none` or for a Reader; 33 for a Proposer, 34 on a ruleset mount |
+| Tools | 48 | 36; 37 on a ruleset mount, 36 with write access `propose`, 21 with `none`; 20 for a Reader, 21 on a ruleset mount; 35 for a Proposer, 36 on a ruleset mount |
 | Sign-in, authentication on | Bearer token of an Ontology Administrator | Bearer token of a Reader, Proposer or Writer on the lens |
 | [Skills](#skills) | Built-in | None |
 

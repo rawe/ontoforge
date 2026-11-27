@@ -5,7 +5,7 @@
  * the caller's subject (shaped as a JWT: `jwt.<subject>.sig`). Covers the route checks (401, 403, 404), the
  * filtered lists, the creator becoming administrator, user management's
  * scope, deletes forgetting assignments, the runtime MCP mount at a
- * Reader's level, a Proposer's changesets a Writer commits and owned
+ * Reader's level, the modeling mount's skills, a Proposer's changesets a Writer commits and owned
  * assistant threads, the Studio helper's among them.
  */
 
@@ -13,11 +13,12 @@ import { randomUUID } from "node:crypto";
 
 import { AIMessage } from "@langchain/core/messages";
 import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { SkillsClient } from "@modelcontextprotocol/client/ext/skills";
 import type { FastifyInstance } from "fastify";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { mcpClient } from "../mcpClient.js";
+import { mcpClient, mcpRequest } from "../mcpClient.js";
 import type { AccessStore } from "../../src/access/store.js";
 import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { createApp } from "../../src/app.js";
@@ -427,6 +428,23 @@ describe("authorization with authentication on", () => {
       };
       expect(refused.isError).toBe(true);
       expect(refused.content[0]!.text).toContain("Proposer on lens 'visitor' cannot commit");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("the modeling mount's built-in skills need the ontology's administrator", async () => {
+    const { headers, payload } = mcpRequest("skills/list");
+    const res = await fetch(`${baseUrl}/mcp/ontologies/fair/model`, {
+      method: "POST",
+      headers: { ...headers, authorization: bearer("alice") },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(403);
+    const client = await mcpAs("creator", "/mcp/ontologies/fair/model");
+    try {
+      const { skills } = await new SkillsClient(client).list();
+      expect(skills.map((skill) => skill.frontmatter.name)).toContain("property-or-relation");
     } finally {
       await client.close();
     }

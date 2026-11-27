@@ -65,6 +65,7 @@ import { IMPORTABLE_FORMAT_VERSIONS } from "../modeling/transfer/upgrades.js";
 import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
+import { builtInSkills } from "./builtInSkills.js";
 import { definitionParameter } from "./searchIndexDefinition.js";
 
 // ---------------------------------------------------------------------------
@@ -264,6 +265,7 @@ const SEARCH_INDEX_RECORD =
  */
 export function createModelingMcpServer(ontologyKey: string, actor: AccessActor | null = null): McpServer {
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" }, SERVER_OPTIONS);
+  builtInSkills.attach(server);
   const authentication = actor !== null;
 
   // The ONE registry-touching tool over MCP (`docs/interfaces/mcp.md#how-a-mount-is-bound`): with

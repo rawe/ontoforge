@@ -1,7 +1,8 @@
 /**
  * The protocol both MCP mounts speak, on the wire (`docs/interfaces/mcp.md#mcp`):
  * revision 2026-07-28 only, each request on its own, answered in plain
- * JSON. A 2025-era `initialize` is refused, and only POST is routed.
+ * JSON. A 2025-era `initialize` is refused, and only POST is routed. Only
+ * the modeling mount serves the built-in skills.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -91,5 +92,27 @@ describe.each(Object.entries(MOUNTS))("the %s mount", (kind, path) => {
     for (const method of ["GET", "DELETE"]) {
       expect((await fetch(`${baseUrl}${path}`, { method })).status, method).toBe(404);
     }
+  });
+});
+
+describe("the built-in skills", () => {
+  const SKILLS = "io.modelcontextprotocol/skills";
+
+  it("are served on the modeling mount", async () => {
+    const discovered = await post(MOUNTS.modeling, "server/discover");
+    expect(discovered.body.result.capabilities.extensions).toHaveProperty([SKILLS]);
+    const listed = await post(MOUNTS.modeling, "skills/list");
+    expect(listed.status).toBe(200);
+    expect(listed.type).toContain("application/json");
+    expect(listed.body.result.skills.map((skill: { frontmatter: { name: string } }) => skill.frontmatter.name)).toContain(
+      "property-or-relation",
+    );
+  });
+
+  it("are not served on a runtime mount", async () => {
+    const discovered = await post(MOUNTS.runtime, "server/discover");
+    expect(discovered.body.result.capabilities.extensions?.[SKILLS]).toBeUndefined();
+    const listed = await post(MOUNTS.runtime, "skills/list");
+    expect(listed.body.error.code).toBe(-32601);
   });
 });

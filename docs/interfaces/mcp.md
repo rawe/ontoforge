@@ -12,6 +12,7 @@ servers: no client reaches both through one MCP connection.
 | Bound to | One ontology | One ontology and one lens |
 | Tools | 45 | 34; 35 on a ruleset mount, 34 with write access `propose`, 19 with `none` or for a Reader; 33 for a Proposer, 34 on a ruleset mount |
 | Sign-in, authentication on | Bearer token of an Ontology Administrator | Bearer token of a Reader, Proposer or Writer on the lens |
+| [Skills](#skills) | Built-in | None |
 
 ## How a mount is bound
 
@@ -104,6 +105,19 @@ meaning as the REST parameter. The search-index tools take the index key as
 `set_retriever` writes the current configuration version, so it takes no version argument.
 Copying, moving, exporting and importing a single retriever are REST only.
 There is no modeling tool for the search-data rebuild (`rebuild-search-data`).
+
+## Skills
+
+The modeling mount serves **built-in skills** through the MCP skills extension: guides in
+the Agent Skill format, a `SKILL.md` with a name and a description, that ship with the
+server and teach a modeler how to design a schema. A client lists them with `skills/list`,
+fetches one with `skills/get` and reads its files as resources under `skill://`. The
+runtime mounts do not declare the extension. With authentication on, skill requests need
+the Ontology Administrator the tools need.
+
+| Skill | Guides |
+|---|---|
+| `property-or-relation` | Whether a value becomes a property or a relation to an entity type of its own: a checklist, the trade-offs, and the modeling tool calls for each choice |
 
 ## Runtime tools
 

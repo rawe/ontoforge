@@ -172,6 +172,11 @@ keeping after.
 **MCP client** — an AI client outside the server, connected to one of its MCP mounts and
 acting on its own judgment. Not an agent, which is an assistant the server runs.
 
+**Skill** — a guide an MCP mount publishes for MCP clients through the MCP skills
+extension: a `SKILL.md` with a name and a description, which a client reads when a task
+calls for it. A **built-in skill** ships with the server and is served on the modeling
+mount. See [interfaces/mcp.md](interfaces/mcp.md#skills).
+
 ### Using the graph
 
 **OQL** — the OntoForge Query Language: a read-only, pattern-matching graph language

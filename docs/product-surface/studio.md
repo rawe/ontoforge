@@ -319,7 +319,7 @@ Three operations, each with its own explanation. See
 
 - **Export** — downloads the ontology's whole design — entity types, relation types,
   properties, search indices, keyword languages, lenses, agents, retrievers, navigators,
-  saved queries and search profiles — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
+  saved queries, search profiles and runtime skills — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
 - **Import** — takes a JSON file and writes it into the current ontology. It reports
   malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and

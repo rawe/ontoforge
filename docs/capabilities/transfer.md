@@ -20,12 +20,15 @@ ontologies, transfer included.
 | Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — its retrievers under `retrievers` and its navigators under `navigators`, both in their portable form — key, name, description, configVersion, config |
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
 | Search profiles | Every search profile of every lens: key, name, description, tree |
+| Runtime skills | Every runtime skill of every lens, under the lens's `skills`: key, description, content |
 | Keyword language set | The languages keyword search stems in, at the top level of the payload |
 | Search indices | The custom index definitions and the managed indices switched off, at the top level of the payload |
 
-Assistants, saved queries and search profiles are nested inside the lens they belong to,
-because that is where they belong ([agents.md](agents.md), [saved-queries.md](saved-queries.md),
-[search-profiles.md](search-profiles.md), [retrievers.md](retrievers.md), [navigators.md](navigators.md)).
+Assistants, saved queries, search profiles and runtime skills are nested inside the lens
+they belong to, because that is where they belong ([agents.md](agents.md),
+[saved-queries.md](saved-queries.md), [search-profiles.md](search-profiles.md),
+[runtime-skills.md](runtime-skills.md), [retrievers.md](retrievers.md),
+[navigators.md](navigators.md)).
 
 > **Instance data is not part of the format.** No entities, no relations, no document
 > content, no chunks, no embedding vectors. Exporting a design and importing it elsewhere
@@ -70,8 +73,8 @@ The version is the format's own line, bumped only when the payload shape changes
 incompatibly. A relation type's `parent` is optional in `8.0`: without it, or with null,
 the relation type is an ordinary one, and the older versions' relation types import as
 ordinary ones too. Its `onePerPair` is optional as well: without it, the relation type is
-one per pair only when it is a parent relation. A lens's `searchProfiles` is optional in
-`8.0`; the older versions carry none.
+one per pair only when it is a parent relation. A lens's `searchProfiles` and `skills` are
+optional in `8.0`; the older versions carry none.
 
 **Import upgrades older versions step by step.** It accepts three older versions and brings
 each up to the current one first, one version at a time, so an older export needs no
@@ -182,8 +185,8 @@ or deleting and recreating the whole ontology and importing into it bare.
 
 ### Identifiers are regenerated, keys are preserved
 
-Every imported object — type, property, lens, agent, saved query, search profile, retriever,
-navigator, search index — receives a freshly generated internal identifier. Nothing in the payload carries
+Every imported object — type, property, lens, agent, saved query, search profile, runtime
+skill, retriever, navigator, search index — receives a freshly generated internal identifier. Nothing in the payload carries
 one, and nothing from the source ontology's identifiers survives.
 
 Keys, by contrast, are preserved verbatim. That is what makes the format portable: after
@@ -234,6 +237,8 @@ Import is a write path, and the write-path rules apply to it:
   Saved-query parameters may not have the `document` data type.
 - Every search profile is checked by the [rules of a save](search-profiles.md#checks-at-save),
   its tree against its lens as imported.
+- Every runtime skill is checked by the [rules of a save](runtime-skills.md#rules), and its
+  key is unique in its lens.
 
 One difference from definition time is worth knowing: an imported saved query's steps are
 **not** checked against the lens — no OQL parsing, no search scope or filter check. A

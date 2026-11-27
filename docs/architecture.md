@@ -164,8 +164,8 @@ agent ever spans two. The architecture makes that structural rather than checked
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
-over everything it contains — schema, lenses, saved queries, search profiles, assistants,
-instance data, rulesets, changesets and search indices.
+over everything it contains — schema, lenses, saved queries, search profiles, runtime
+skills, assistants, instance data, rulesets, changesets and search indices.
 
 ## Logical data model
 
@@ -196,11 +196,12 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
 | Search profile | lens + `key` | name, description, search tree |
+| Runtime skill | lens + `key` | description, content |
 | Retriever | lens + `key` | name, description, configuration version, configuration, conversion warnings |
 | Navigator | lens + `key` | name, description, configuration version, configuration |
 
-Inclusions, agent configs, saved queries, search profiles, retrievers and navigators are
-the six things that belong *to a lens*. Types, properties and search indices never do. At instance level,
+Inclusions, agent configs, saved queries, search profiles, runtime skills, retrievers and
+navigators are the seven things that belong *to a lens*. Types, properties and search indices never do. At instance level,
 a changeset belongs to a lens too, and dies with it. The same type key, and the same
 lens key, can exist independently in two ontologies.
 

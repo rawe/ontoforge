@@ -161,6 +161,22 @@ export interface SearchProfile {
   tree: SearchTreeNode
 }
 
+/** A runtime skill of a lens: a guide its runtime MCP mounts publish as a skill. */
+export interface RuntimeSkill {
+  key: string
+  description: string
+  /** The guide's Markdown body. */
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** The body of a runtime skill's upsert; the key is in the path. */
+export interface RuntimeSkillInput {
+  description: string
+  content: string
+}
+
 /** A search profile as the runtime lists it: what a caller needs to run it, never its tree. */
 export interface RuntimeSearchProfile {
   key: string

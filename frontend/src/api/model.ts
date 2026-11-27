@@ -33,6 +33,8 @@ import type {
   RelationType,
   RelationTypeInput,
   RelationTypeUpdate,
+  RuntimeSkill,
+  RuntimeSkillInput,
   SavedQuery,
   SavedQueryInput,
   ScopeInclude,
@@ -367,6 +369,29 @@ export const upsertSearchProfile = (
 export const deleteSearchProfile = (ontologyKey: string, lensKey: string, profileKey: string) =>
   request<undefined>(
     `${base(ontologyKey)}/lenses/${lensKey}/search-profiles/${profileKey}`,
+    { method: 'DELETE' },
+  )
+
+/* ------------------------------ runtime skills ------------------------------ */
+
+export const listRuntimeSkills = (ontologyKey: string, lensKey: string) =>
+  request<RuntimeSkill[]>(`${base(ontologyKey)}/lenses/${lensKey}/skills`)
+
+/** Upsert — 201 created / 200 replaced. */
+export const upsertRuntimeSkill = (
+  ontologyKey: string,
+  lensKey: string,
+  skillKey: string,
+  body: RuntimeSkillInput,
+) =>
+  request<RuntimeSkill>(
+    `${base(ontologyKey)}/lenses/${lensKey}/skills/${skillKey}`,
+    { method: 'PUT', body },
+  )
+
+export const deleteRuntimeSkill = (ontologyKey: string, lensKey: string, skillKey: string) =>
+  request<undefined>(
+    `${base(ontologyKey)}/lenses/${lensKey}/skills/${skillKey}`,
     { method: 'DELETE' },
   )
 

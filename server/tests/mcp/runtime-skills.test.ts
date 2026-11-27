@@ -81,6 +81,11 @@ describe("the SKILL.md of a runtime skill", () => {
         "# Find people\n\nSearch first, then read.\n",
     );
   });
+
+  it("keeps a description with Unicode line separators on its frontmatter line", () => {
+    const text = runtimeSkillMarkdown({ ...GUIDE, description: "One --- two" });
+    expect(text.split("\n")[2]).toBe('description: "One\\u2028---\\u2029two"');
+  });
 });
 
 describe("a runtime server", () => {

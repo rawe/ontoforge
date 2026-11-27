@@ -157,6 +157,12 @@ describe("modeling MCP", () => {
       const got = await call("get_runtime_skill", { lens_key: "test_lens", skill_key: "by-mcp" });
       expect(JSON.parse(got.content[0]!.text)).toMatchObject({ key: "by-mcp", description: "Again.", content: "# Again\n" });
 
+      // The export carries the skill; get_schema leaves runtime skills out.
+      const lensOf = async (tool: string) =>
+        JSON.parse((await call(tool, {})).content[0]!.text).lenses.find((lens: Row) => lens.key === "test_lens");
+      expect((await lensOf("export_schema")).skills).toEqual([{ key: "by-mcp", description: "Again.", content: "# Again\n" }]);
+      expect(await lensOf("get_schema")).not.toHaveProperty("skills");
+
       const deleted = await call("delete_runtime_skill", { lens_key: "test_lens", skill_key: "by-mcp" });
       expect(deleted.isError).toBeFalsy();
       expect(JSON.parse((await call("list_runtime_skills", { lens_key: "test_lens" })).content[0]!.text)).toEqual([]);
@@ -187,6 +193,10 @@ describe("runtime MCP", () => {
       const file = await hr.read(skill);
       expect(file.verified).toBe(true);
       expect(file.body).toBe("HR body.");
+      // The runtime get_schema tool carries no skills.
+      const schema = (await own.callTool({ name: "get_schema", arguments: {} })) as unknown as { content: { text: string }[] };
+      expect(schema.content[0]!.text).not.toContain("HR body.");
+      expect(JSON.parse(schema.content[0]!.text)).not.toHaveProperty("skills");
 
       // Another lens's skill, by URI and as a resource: not served here.
       await expect(hr.get("skill://only-test/SKILL.md")).rejects.toThrow(/No skill is served/);

@@ -15,14 +15,17 @@ import { skillEntry, SkillsExtension, type SkillSource } from "@modelcontextprot
 
 import type { RuntimeSkill } from "../core/runtimeSkill.js";
 
-/** The `SKILL.md` of a runtime skill. Name and description are written as
- * double-quoted YAML (JSON is valid YAML), so any description text and a
- * key such as `123` or `true` stay strings. */
+/** A string as double-quoted YAML (JSON is valid YAML), with the two
+ * Unicode line separators JSON leaves literal escaped too, so the value
+ * stays on its line whatever text it holds. */
+function quoted(text: string): string {
+  return JSON.stringify(text).replace(/[\u2028\u2029]/g, (c) => (c === "\u2028" ? "\\u2028" : "\\u2029"));
+}
+
+/** The `SKILL.md` of a runtime skill. Name and description are quoted, so
+ * any description text and a key such as `123` or `true` stay strings. */
 export function runtimeSkillMarkdown(skill: RuntimeSkill): string {
-  return (
-    `---\nname: ${JSON.stringify(skill.key)}\ndescription: ${JSON.stringify(skill.description)}\n---\n` +
-    skill.content
-  );
+  return `---\nname: ${quoted(skill.key)}\ndescription: ${quoted(skill.description)}\n---\n` + skill.content;
 }
 
 /** The key a `SKILL.md` URI names; undefined for any other URI. */

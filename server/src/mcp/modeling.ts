@@ -309,13 +309,15 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries, " +
-        "search profiles and runtime skills.",
+        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries " +
+        "and search profiles. Runtime skills are not included: read them with list_runtime_skills.",
       inputSchema: z.object({}),
     },
     wrap("get_schema", async () => {
       const result = await service.getSchemaExport(await getModelingStore(ontologyKey));
-      return jsonResult(result);
+      // The export without each lens's runtime skills: guides, not schema.
+      const lenses = (result.lenses as Record<string, unknown>[]).map(({ skills: _skills, ...lens }) => lens);
+      return jsonResult({ ...result, lenses });
     }),
   );
 

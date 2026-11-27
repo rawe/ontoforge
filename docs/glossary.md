@@ -55,8 +55,8 @@ of its level:
   `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
   arguments.
 - **Ruleset keys** match `^[a-z][a-z0-9_-]*$`.
-- **Runtime-skill keys** follow the Agent Skill name rule, because the key is the skill's
-  name in MCP clients: 1 to 64 lowercase letters, digits and single hyphens.
+- **Runtime-skill keys** follow their own rule, because the key is the skill's name in
+  MCP clients: see [runtime skills](capabilities/runtime-skills.md#rules).
 
 ### Lenses
 

@@ -1838,3 +1838,60 @@ describe("search profiles", () => {
     expect(holder.store.upsertSearchProfile).not.toHaveBeenCalled();
   });
 });
+
+describe("runtime skills", () => {
+  const SKILL = { key: "find-people", description: "Find people by name.", content: "# Find people\n" };
+
+  it("export nests each lens's runtime skills in it", async () => {
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "hr_view", name: "HR View", description: null, entityInclusions: [], relationInclusions: [] }],
+    });
+    holder.store.listRuntimeSkills.mockResolvedValue([{ runtimeSkillId: "rs-1", ...SKILL, createdAt: NOW, updatedAt: NOW }]);
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().lenses[0].skills).toEqual([SKILL]);
+    expect(holder.store.listRuntimeSkills).toHaveBeenCalledWith("lens-1");
+  });
+
+  it("import writes each lens's runtime skills into the lens it creates", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(importPayload({ lenses: [{ key: "imported", name: "Imported", skills: [SKILL] }] }));
+    expect(res.statusCode, res.body).toBe(201);
+    const lensId = holder.store.createLens.mock.calls[0]![0];
+    const [skillLensId, skillId, key, description, content] = holder.store.upsertRuntimeSkill.mock.calls[0]!;
+    expect([skillLensId, key, description, content]).toEqual([lensId, SKILL.key, SKILL.description, SKILL.content]);
+    expect(skillId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("a payload without skills imports, writing none", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(importPayload());
+    expect(res.statusCode).toBe(201);
+    expect(holder.store.upsertRuntimeSkill).not.toHaveBeenCalled();
+  });
+
+  it("collects a bad key, a duplicate key and bad fields with the other violations; writes nothing", async () => {
+    const res = await postImport(
+      importPayload({
+        lenses: [
+          {
+            key: "imported",
+            name: "Imported",
+            skills: [SKILL, { ...SKILL }, { key: "Bad_Key", description: "", content: "" }],
+          },
+        ],
+      }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      "Import error: duplicate runtime skill 'find-people' in lens 'imported'",
+      expect.stringMatching(/^Import error: Invalid runtime skill key 'Bad_Key'/),
+      "Import error: runtime skill 'Bad_Key' of lens 'imported': description must be 1 to 1024 characters",
+      "Import error: runtime skill 'Bad_Key' of lens 'imported': content must not be empty",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(holder.store.upsertRuntimeSkill).not.toHaveBeenCalled();
+  });
+});

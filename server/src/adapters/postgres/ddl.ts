@@ -218,6 +218,18 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT search_profile_key_unique UNIQUE (lens_id, key)     -- upsert arbiter
 )`,
 
+  `CREATE TABLE IF NOT EXISTS runtime_skill (
+  runtime_skill_id uuid        CONSTRAINT runtime_skill_pk PRIMARY KEY,
+  lens_id          uuid        NOT NULL CONSTRAINT runtime_skill_lens_fk
+                               REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key              text        NOT NULL,
+  description      text        NOT NULL,
+  content          text        NOT NULL,  -- the skill's Markdown body
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT runtime_skill_key_unique UNIQUE (lens_id, key)      -- upsert arbiter
+)`,
+
   `CREATE TABLE IF NOT EXISTS assistant_retriever (
   assistant_retriever_id uuid        CONSTRAINT assistant_retriever_pk PRIMARY KEY,
   lens_id                uuid        NOT NULL CONSTRAINT assistant_retriever_lens_fk

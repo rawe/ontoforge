@@ -400,6 +400,19 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return result.rows.map(camelizeRow);
   }
 
+  /** Runtime-skill rows for one lens, by key. */
+  async getRuntimeSkills(lensKey: string): Promise<Row[]> {
+    const result = await this.query(
+      `SELECT rs.key, rs.description, rs.content
+       FROM runtime_skill rs
+       JOIN lens o ON o.lens_id = rs.lens_id
+       WHERE o.key = $1
+       ORDER BY rs.key`,
+      [lensKey],
+    );
+    return result.rows.map(camelizeRow);
+  }
+
   // ------------------------------------------------------------------
   // Entity instances
   // ------------------------------------------------------------------

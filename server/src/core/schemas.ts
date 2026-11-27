@@ -38,6 +38,14 @@ export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
 export const RULESET_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 /**
+ * Key rule of runtime skills: the Agent Skill name rule — lowercase letters,
+ * digits and single hyphens, 1 to `MAX_KEY_LENGTH` characters. Stricter than
+ * the lens-resource rule because the key is the skill's name on the wire,
+ * where MCP clients enforce exactly this rule.
+ */
+export const RUNTIME_SKILL_KEY_PATTERN = /^[\da-z]+(?:-[\da-z]+)*$/;
+
+/**
  * Maximum length for every key kind — entity type, relation type, lens,
  * property, agent, saved query. Boundary hygiene, not a physical limit: an
  * absurd key dies as a clean 422 at validation instead of deep inside

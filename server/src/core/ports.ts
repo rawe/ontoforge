@@ -522,6 +522,25 @@ export interface ModelingStore {
 
   deleteSearchProfile(lensId: string, key: string): Promise<boolean>;
 
+  // ------------------------------------------------------------------
+  // Runtime skills
+  // ------------------------------------------------------------------
+
+  /** A lens's runtime skills, by key: key, description, content,
+   * timestamps. */
+  listRuntimeSkills(lensId: string): Promise<Row[]>;
+
+  /** Upsert on the lens and key. */
+  upsertRuntimeSkill(
+    lensId: string,
+    runtimeSkillId: string,
+    key: string,
+    description: string,
+    content: string,
+  ): Promise<[Row, boolean]>;
+
+  deleteRuntimeSkill(lensId: string, key: string): Promise<boolean>;
+
   /** Ensure the saved-query description index at `dimensions`; a drifted
    * width is reported, never repaired. */
   ensureSavedQueryVectorIndex(dimensions: number): Promise<void>;
@@ -627,6 +646,9 @@ export interface RuntimeStore {
   /** A lens's search profiles, by key: key, name, description and the tree
    * as stored. */
   getSearchProfiles(lensKey: string): Promise<Row[]>;
+
+  /** A lens's runtime skills, by key: key, description and content. */
+  getRuntimeSkills(lensKey: string): Promise<Row[]>;
 
   // ------------------------------------------------------------------
   // Search indices

@@ -238,7 +238,8 @@
                     ]
                 }
             ],
-            "searchProfiles": []
+            "searchProfiles": [],
+            "skills": []
         },
         {
             "key": "test_lens",
@@ -252,7 +253,8 @@
                 "navigators": []
             },
             "savedQueries": [],
-            "searchProfiles": []
+            "searchProfiles": [],
+            "skills": []
         }
     ],
     "keywordLanguages": [

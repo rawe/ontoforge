@@ -24,6 +24,9 @@
  * its write access allows (`writeAccess.ts`): at 'propose' the eight write
  * tools require `changeset_id` and `commit_changeset` is not listed; at
  * 'none' only the reads and the changeset reads are.
+ *
+ * Every runtime server also serves its lens's runtime skills through the
+ * MCP skills extension (`runtimeSkills.ts`), at every level.
  */
 
 import {
@@ -45,6 +48,7 @@ import { roleRefusal } from "../access/authorize.js";
 import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore, type WriteAccess } from "../core/ports.js";
 import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
+import { loadSchema } from "../runtime/schemaCache.js";
 import { filterRules } from "../runtime/readHelpers.js";
 import * as changesets from "../runtime/changesets.js";
 import * as service from "../runtime/service.js";
@@ -58,6 +62,7 @@ import {
   type Operation,
 } from "../runtime/writeAccess.js";
 import { formatToolError, SERVER_OPTIONS } from "./modeling.js";
+import { runtimeSkillsExtension } from "./runtimeSkills.js";
 
 interface ToolResult {
   content: { type: "text"; text: string }[];
@@ -250,6 +255,15 @@ export function createRuntimeMcpServer(
 ): McpServer {
   const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" }, SERVER_OPTIONS);
   const { rulesetKey } = binding;
+
+  // The lens's runtime skills, at every role and ruleset level: reading
+  // them is a read of the lens's design. A ruleset mount first checks its
+  // ruleset, as a tool call does.
+  runtimeSkillsExtension(async () => {
+    const store = await getRuntimeStore(ontologyKey);
+    if (rulesetKey !== null) await readMountRuleset(lensKey, rulesetKey, store);
+    return (await loadSchema(lensKey, store)).runtimeSkills;
+  }).attach(server);
 
   const openStore = async (operation: Operation): Promise<RuntimeStore> => {
     const store = await getRuntimeStore(ontologyKey);

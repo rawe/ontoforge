@@ -26,6 +26,7 @@ import type { AccessActor } from "../access/store.js";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
+import { MAX_RUNTIME_SKILL_DESCRIPTION_LENGTH } from "../core/runtimeSkill.js";
 import {
   DEFAULT_ANSWER_FIELD_CHARACTERS,
   DEFAULT_THRESHOLD,
@@ -39,6 +40,7 @@ import {
   LENS_RESOURCE_KEY_PATTERN,
   MAX_KEY_LENGTH,
   PARENT_ENDS,
+  RUNTIME_SKILL_KEY_PATTERN,
   type ParentEnd,
   type TypeKind,
 } from "../core/schemas.js";
@@ -122,14 +124,11 @@ export function formatToolError(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 /** Options of both MCP servers. A server lives for one request, so its
- * tool list never changes while a client holds it: advertising
- * `listChanged: false` keeps clients from opening a change stream. */
-export const SERVER_OPTIONS: McpServerOptions = { capabilities: { tools: { listChanged: false } } };
-
-/** The modeling server also serves resources, the built-in skills' files,
- * and they do not change either. */
-const MODELING_OPTIONS: McpServerOptions = {
-  capabilities: { ...SERVER_OPTIONS.capabilities, resources: { listChanged: false } },
+ * tool list and its resources — the skills' files — never change while a
+ * client holds it: advertising `listChanged: false` keeps clients from
+ * opening a change stream. */
+export const SERVER_OPTIONS: McpServerOptions = {
+  capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
 };
 
 interface ToolResult {
@@ -270,7 +269,7 @@ const SEARCH_INDEX_RECORD =
  * is created over REST, where its creator becomes its administrator.
  */
 export function createModelingMcpServer(ontologyKey: string, actor: AccessActor | null = null): McpServer {
-  const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" }, MODELING_OPTIONS);
+  const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" }, SERVER_OPTIONS);
   builtInSkills.attach(server);
   const authentication = actor !== null;
 
@@ -310,7 +309,8 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries and search profiles.",
+        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries, " +
+        "search profiles and runtime skills.",
       inputSchema: z.object({}),
     },
     wrap("get_schema", async () => {
@@ -698,7 +698,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
         "(JSON), including the keyword language set, the search indices and each lens's " +
-        "assistants (agents, retrievers and navigators), saved queries and search profiles.",
+        "assistants (agents, retrievers and navigators), saved queries, search profiles and runtime skills.",
       inputSchema: z.object({}),
     },
     wrap("export_schema", async () => {
@@ -714,7 +714,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         `Import a v${TRANSFER_FORMAT_VERSION} schema payload (also accepted, upgraded on the way in: ` +
         IMPORTABLE_FORMAT_VERSIONS.filter((v) => v !== TRANSFER_FORMAT_VERSION).map((v) => `v${v}`).join(", ") +
         "). Creates entity types, relation types, and lenses with scope configuration, " +
-        "assistants, saved queries and search profiles. Answers with the created lenses and leftOutSavedQueries: " +
+        "assistants, saved queries, search profiles and runtime skills. Answers with the created lenses and leftOutSavedQueries: " +
         "the saved queries ({lens, key}) of an older payload the upgrade could not convert.",
       inputSchema: z.object({
         payload: z.record(z.string(), z.unknown()),
@@ -1571,6 +1571,90 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     wrap("delete_search_profile", async (args: { lens_key: string; profile_key: string }) => {
       await service.deleteSearchProfile(args.lens_key, args.profile_key, await getModelingStore(ontologyKey));
       return textResult(`Search profile '${args.profile_key}' deleted from lens '${args.lens_key}'.`);
+    }),
+  );
+
+  // --- Runtime Skill Tools ---
+
+  server.registerTool(
+    "list_runtime_skills",
+    {
+      description:
+        "List the runtime skills of a lens: key and description of each, by key. A runtime skill is a " +
+        "Markdown guide that the lens's runtime MCP connection publishes as a skill; get_runtime_skill " +
+        "reads one's content.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+      }),
+    },
+    wrap("list_runtime_skills", async (args: { lens_key: string }) => {
+      const results = await service.listRuntimeSkills(args.lens_key, await getModelingStore(ontologyKey));
+      return jsonResult(results.map(({ key, description }) => ({ key, description })));
+    }),
+  );
+
+  server.registerTool(
+    "get_runtime_skill",
+    {
+      description: "Read one runtime skill of a lens by key: key, description and Markdown content.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+        skill_key: z.string(),
+      }),
+    },
+    wrap("get_runtime_skill", async (args: { lens_key: string; skill_key: string }) => {
+      const result = await service.getRuntimeSkill(args.lens_key, args.skill_key, await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_runtime_skill",
+    {
+      description:
+        "Create or replace a runtime skill of a lens: a Markdown guide that MCP clients connected to the " +
+        "lens's runtime MCP connection, with or without a ruleset, discover and load as a skill named by its " +
+        "key. Only that lens serves it. Key: 1 to " +
+        `${MAX_KEY_LENGTH} lowercase letters, digits and single hyphens (pattern ${RUNTIME_SKILL_KEY_PATTERN.source}), ` +
+        "no underscore; unique within the lens, so an existing key is replaced. description: 1 to " +
+        `${MAX_RUNTIME_SKILL_DESCRIPTION_LENGTH} characters saying what the skill helps with and when to use it; ` +
+        "clients show it and choose skills by it. content: the non-empty Markdown body without frontmatter; " +
+        "the server adds the name and description. Returns the skill and whether it was created.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+        key: z.string(),
+        description: z.string(),
+        content: z.string(),
+      }),
+    },
+    wrap("set_runtime_skill", async (args: {
+      lens_key: string;
+      key: string;
+      description: string;
+      content: string;
+    }) => {
+      const [result, created] = await service.upsertRuntimeSkill(
+        args.lens_key,
+        args.key,
+        { description: args.description, content: args.content },
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult({ ...result, created });
+    }),
+  );
+
+  server.registerTool(
+    "delete_runtime_skill",
+    {
+      description: "Delete a runtime skill from a lens.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+        skill_key: z.string(),
+      }),
+    },
+    wrap("delete_runtime_skill", async (args: { lens_key: string; skill_key: string }) => {
+      await service.deleteRuntimeSkill(args.lens_key, args.skill_key, await getModelingStore(ontologyKey));
+      return textResult(`Runtime skill '${args.skill_key}' deleted from lens '${args.lens_key}'.`);
     }),
   );
 

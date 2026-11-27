@@ -85,9 +85,9 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the forty-eight modeling tools — and NO update-inclusion tool", async () => {
+  it("lists exactly the fifty-two modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(48);
+    expect(tools.tools).toHaveLength(52);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
@@ -103,6 +103,7 @@ describe("tool surface", () => {
       "delete_property",
       "delete_relation_type",
       "delete_retriever",
+      "delete_runtime_skill",
       "delete_saved_query",
       "delete_search_index",
       "delete_search_profile",
@@ -110,6 +111,7 @@ describe("tool surface", () => {
       "export_schema",
       "get_agent",
       "get_retriever",
+      "get_runtime_skill",
       "get_schema",
       "get_search_index",
       "get_search_index_status",
@@ -117,6 +119,7 @@ describe("tool surface", () => {
       "import_schema",
       "list_agents",
       "list_retrievers",
+      "list_runtime_skills",
       "list_saved_queries",
       "list_search_indices",
       "list_search_profiles",
@@ -127,6 +130,7 @@ describe("tool surface", () => {
       "remove_search_index_from_lens",
       "set_agent",
       "set_retriever",
+      "set_runtime_skill",
       "set_saved_query",
       "set_search_profile",
       "set_search_settings",

@@ -110,10 +110,14 @@ describe("the built-in skills", () => {
     );
   });
 
-  it("are not served on a runtime mount", async () => {
+  it("are not served on a runtime mount, which serves its lens's runtime skills instead", async () => {
     const discovered = await post(MOUNTS.runtime, "server/discover");
-    expect(discovered.body.result.capabilities.extensions?.[SKILLS]).toBeUndefined();
+    expect(discovered.body.result.capabilities.extensions).toHaveProperty([SKILLS]);
+    expect(discovered.body.result.capabilities.resources).toEqual({ listChanged: false });
     const listed = await post(MOUNTS.runtime, "skills/list");
-    expect(listed.body.error.code).toBe(-32601);
+    expect(listed.status).toBe(200);
+    expect(listed.type).toContain("application/json");
+    // The lens holds no runtime skill.
+    expect(listed.body.result.skills).toEqual([]);
   });
 });

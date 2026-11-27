@@ -33,7 +33,7 @@ import type { Querier } from "./errors.js";
 import { searchPathStatement } from "./errors.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 14;
+export const STORAGE_VERSION = 15;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 8;
@@ -158,6 +158,23 @@ const STEPS: Step[] = [
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT search_profile_key_unique UNIQUE (lens_id, key)
+)`,
+    ],
+  },
+  {
+    // Runtime skills: lens-owned records a lens's runtime MCP mount serves.
+    to: 15,
+    actions: [
+      `CREATE TABLE runtime_skill (
+  runtime_skill_id uuid        CONSTRAINT runtime_skill_pk PRIMARY KEY,
+  lens_id          uuid        NOT NULL CONSTRAINT runtime_skill_lens_fk
+                               REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key              text        NOT NULL,
+  description      text        NOT NULL,
+  content          text        NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT runtime_skill_key_unique UNIQUE (lens_id, key)
 )`,
     ],
   },

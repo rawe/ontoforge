@@ -93,6 +93,12 @@ async function storedRows(
   return rows;
 }
 
+/** Storage at version 14: no runtime-skill table. Records no version —
+ * every older layout builds on it. */
+async function makeVersion14Layout(namespace: string): Promise<void> {
+  await runQuery(`DROP TABLE ${namespace}.runtime_skill`);
+}
+
 /** Storage at version 13: step 13's table of search trees in place of the
  * search-profile table. Records no version. */
 async function makeVersion13Layout(namespace: string): Promise<void> {
@@ -115,6 +121,7 @@ async function makeVersion13Layout(namespace: string): Promise<void> {
  * search-profile table. Records no version — every older layout builds on
  * it. */
 async function makeVersion12Layout(namespace: string): Promise<void> {
+  await makeVersion14Layout(namespace);
   await runQuery(`DROP TABLE ${namespace}.search_profile`);
 }
 
@@ -222,7 +229,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 8 to 14 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 8 to 15 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect(await Promise.all(RELEASE_711.map((namespace, i) => storedRows(namespace, columns[i]!, omit)))).toEqual(
       before,
@@ -310,7 +317,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 8 to 14 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 8 to 15 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect((await runQuery(`SELECT ontology_id, revision FROM ont_older.design_revision`)).rows).toEqual([
       { ontology_id: ID_A, revision: 1 },
@@ -352,7 +359,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 9 to 14 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 9 to 15 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect((await runQuery(`SELECT identity_properties FROM ont_older.entity_type`)).rows).toEqual([
       { identity_properties: null },
@@ -395,7 +402,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 10 to 14 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 10 to 15 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     const modeling = await getModelingStore("older");
     expect((await modeling.listRelationTypes()).map((rt) => [rt.key, rt.onePerPair])).toEqual([
@@ -431,7 +438,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 11 to 14 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 11 to 15 (1 ontologies).");
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Deleting saved query 'by-title' of lens 'all'"));
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     const stored = await runQuery(`SELECT key, steps FROM ont_older.saved_query ORDER BY key`);
@@ -458,7 +465,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 12 to 14 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 12 to 15 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -492,7 +499,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 13 to 14 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 13 to 15 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     const gone = await runQuery(`SELECT to_regclass('ont_older.named_search') IS NULL AS gone`);
     expect(gone.rows[0]!["gone"]).toBe(true);
@@ -502,6 +509,32 @@ describe("PostgreSQL storage version", () => {
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
   });
 
+  it("upgrades version-14 storage by adding the runtime-skill table, deleted with its lens", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    const modeling = await getModelingStore("older");
+    const lensId = randomUUID();
+    await modeling.createLens(lensId, "all", "All", null);
+    await makeVersion14Layout("ont_older");
+    await recordVersion(14);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 14 to 15 (1 ontologies).");
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+    // The existing lens has no skills; the table works, one key per lens, gone with the lens.
+    expect(await modeling.listRuntimeSkills(lensId)).toEqual([]);
+    const [row, created] = await modeling.upsertRuntimeSkill(lensId, randomUUID(), "find", "Find.", "# Find\n");
+    expect([created, row["content"]]).toEqual([true, "# Find\n"]);
+    const [, replaced] = await modeling.upsertRuntimeSkill(lensId, randomUUID(), "find", "Find again.", "# Again\n");
+    expect(replaced).toBe(false);
+    expect((await modeling.listRuntimeSkills(lensId)).map((skill) => skill["description"])).toEqual(["Find again."]);
+    expect(await modeling.deleteLens(lensId)).toBe(true);
+    const left = await runQuery(`SELECT count(*)::int AS n FROM ont_older.runtime_skill`);
+    expect(left.rows[0]!["n"]).toBe(0);
+  });
 
   it("a lens delete removes its changesets with their objects and values; a ruleset delete leaves them", async () => {
     await getOntologyRegistry().createOntology(ID_A, "fresh", null, null);

@@ -36,6 +36,8 @@ import {
   LensUpdate,
   SearchProfileResponse,
   SearchProfileUpsert,
+  RuntimeSkillResponse,
+  RuntimeSkillUpsert,
   PropertyDefinitionCreate,
   PropertyDefinitionResponse,
   PropertyDefinitionUpdate,
@@ -72,12 +74,14 @@ const RelationTypePropertyParams = OntologyParams.extend({
   propertyId: z.string(),
 });
 
-// Assistants, saved queries and search profiles are the modeling exceptions
-// addressed by KEY, not internal identifier (`docs/interfaces/`).
+// Assistants, saved queries, search profiles and runtime skills are the
+// modeling exceptions addressed by KEY, not internal identifier
+// (`docs/interfaces/`).
 const LensKeyParams = OntologyParams.extend({ lensKey: z.string() });
 const AssistantKeyParams = OntologyParams.extend({ lensKey: z.string(), assistantKey: z.string() });
 const QueryKeyParams = OntologyParams.extend({ lensKey: z.string(), queryKey: z.string() });
 const SearchProfileKeyParams = OntologyParams.extend({ lensKey: z.string(), profileKey: z.string() });
+const SkillKeyParams = OntologyParams.extend({ lensKey: z.string(), skillKey: z.string() });
 // Search indices are addressed by key too: managed keys are derived from
 // the schema and carry no identifier of their own.
 const IndexKeyParams = OntologyParams.extend({ indexKey: z.string() });
@@ -1169,6 +1173,77 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       await service.deleteSearchProfile(
         request.params.lensKey,
         request.params.profileKey,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  // --- Runtime Skills (addressed by lens key + key) ---
+
+  app.get(
+    "/lenses/:lensKey/skills",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: LensKeyParams,
+        response: { 200: z.array(RuntimeSkillResponse) },
+      },
+    },
+    async (request) =>
+      service.listRuntimeSkills(
+        request.params.lensKey,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.get(
+    "/lenses/:lensKey/skills/:skillKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: SkillKeyParams,
+        response: { 200: RuntimeSkillResponse },
+      },
+    },
+    async (request) =>
+      service.getRuntimeSkill(
+        request.params.lensKey,
+        request.params.skillKey,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.put(
+    "/lenses/:lensKey/skills/:skillKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: SkillKeyParams,
+        body: RuntimeSkillUpsert,
+        response: { 200: RuntimeSkillResponse, 201: RuntimeSkillResponse },
+      },
+    },
+    async (request, reply) => {
+      const [result, created] = await service.upsertRuntimeSkill(
+        request.params.lensKey,
+        request.params.skillKey,
+        request.body,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(created ? 201 : 200).send(result);
+    },
+  );
+
+  app.delete(
+    "/lenses/:lensKey/skills/:skillKey",
+    {
+      schema: { tags: ["modeling"], params: SkillKeyParams },
+    },
+    async (request, reply) => {
+      await service.deleteRuntimeSkill(
+        request.params.lensKey,
+        request.params.skillKey,
         await getModelingStore(request.params.ontologyKey),
       );
       return reply.status(204).send();

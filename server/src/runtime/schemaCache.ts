@@ -4,8 +4,9 @@
  * Each lens is assembled once — lazily, on first use — from the runtime
  * store's own schema reads (runtime never calls modeling; the schema is a
  * VALUE to runtime, which is what makes this cache possible) and held in
- * memory: its scoped schema, the full schema, and its agent configurations
- * and saved queries (typed values from `core/ai.ts`).
+ * memory: its scoped schema, the full schema, its agent configurations
+ * and saved queries (typed values from `core/ai.ts`), search profiles and
+ * runtime skills.
  *
  * The cache is per process, and every entry is tagged with the design
  * revision its schema was read with (`DesignRevision`, from the same
@@ -27,6 +28,7 @@
  */
 
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
+import type { RuntimeSkill } from "../core/runtimeSkill.js";
 import type { SearchProfileConfig, StoredSearchNode } from "../core/searchProfile.js";
 import { NotFoundError } from "../core/exceptions.js";
 import { withoutFormerTools } from "./toolNames.js";
@@ -83,6 +85,8 @@ export interface LoadedSchema {
   savedQueries: Record<string, SavedQueryConfig>;
   /** Search profiles keyed by key, in key order. */
   searchProfiles: Record<string, SearchProfileConfig>;
+  /** Runtime skills keyed by key, in key order. */
+  runtimeSkills: Record<string, RuntimeSkill>;
   /** Whether the lens has type inclusions, and the search indices it
    * includes by key (`core/searchQuery.ts` decides availability). */
   searchIndexScope: { scoped: boolean; includedIndices: string[] };
@@ -250,9 +254,9 @@ export async function loadSchema(
  * The cache-free build: the lens assembled fresh from the bound store's
  * schema reads. Unknown key -> not found.
  *
- * The schema and its revision come from one snapshot; the agents and
- * saved queries are read after it, so they are never older than the
- * revision the build is tagged with.
+ * The schema and its revision come from one snapshot; the agents, saved
+ * queries, search profiles and runtime skills are read after it, so they
+ * are never older than the revision the build is tagged with.
  */
 export async function loadSchemaUncached(
   lensKey: string,
@@ -302,6 +306,15 @@ export async function loadSchemaUncached(
     };
   }
 
+  const runtimeSkills: Record<string, RuntimeSkill> = {};
+  for (const row of await store.getRuntimeSkills(lensKey)) {
+    runtimeSkills[row.key as string] = {
+      key: row.key as string,
+      description: row.description as string,
+      content: row.content as string,
+    };
+  }
+
   const entityInclusions = schema.entityInclusions as InclusionRow[];
   const relationInclusions = schema.relationInclusions as InclusionRow[];
   const searchIndexScope = {
@@ -315,6 +328,7 @@ export async function loadSchemaUncached(
     agentConfigs,
     savedQueries,
     searchProfiles,
+    runtimeSkills,
     searchIndexScope,
     design: schema.design as DesignRevision,
   };

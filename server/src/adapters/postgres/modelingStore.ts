@@ -91,6 +91,7 @@ const AGENT_COLS =
 const SAVED_QUERY_COLS =
   "saved_query_id, key, name, description, steps, parameters, created_at, updated_at";
 const SEARCH_PROFILE_COLS = "search_profile_id, key, name, description, tree, created_at, updated_at";
+const RUNTIME_SKILL_COLS = "runtime_skill_id, key, description, content, created_at, updated_at";
 
 /** The polymorphic-owner column the port's `typeKind` selects. */
 function ownerColumn(typeKind: TypeKind): "entity_type_id" | "relation_type_id" {
@@ -1256,6 +1257,51 @@ export class PostgresModelingStore implements ModelingStore {
       return false;
     }
     const result = await this.query(`DELETE FROM search_profile WHERE lens_id = $1 AND key = $2`, [lensId, key]);
+    return result.rowCount > 0;
+  }
+
+  // ------------------------------------------------------------------
+  // Runtime skills
+  // ------------------------------------------------------------------
+
+  async listRuntimeSkills(lensId: string): Promise<Row[]> {
+    if (!isUuid(lensId)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${RUNTIME_SKILL_COLS} FROM runtime_skill WHERE lens_id = $1 ORDER BY key`,
+      [lensId],
+    );
+    return camelizeRows(result.rows);
+  }
+
+  /** Upsert on the `(lens_id, key)` arbiter. */
+  async upsertRuntimeSkill(
+    lensId: string,
+    runtimeSkillId: string,
+    key: string,
+    description: string,
+    content: string,
+  ): Promise<[Row, boolean]> {
+    const result = await this.query(
+      `INSERT INTO runtime_skill (runtime_skill_id, lens_id, key, description, content)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (lens_id, key) DO UPDATE SET
+         description = EXCLUDED.description,
+         content = EXCLUDED.content,
+         updated_at = now()
+       RETURNING ${RUNTIME_SKILL_COLS}, (runtime_skill_id = $1) AS created`,
+      [runtimeSkillId, lensId, key, description, content],
+    );
+    const { created, ...row } = camelizeRow(result.rows[0]!);
+    return [row, created as boolean];
+  }
+
+  async deleteRuntimeSkill(lensId: string, key: string): Promise<boolean> {
+    if (!isUuid(lensId)) {
+      return false;
+    }
+    const result = await this.query(`DELETE FROM runtime_skill WHERE lens_id = $1 AND key = $2`, [lensId, key]);
     return result.rowCount > 0;
   }
 

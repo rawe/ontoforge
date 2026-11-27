@@ -1,21 +1,19 @@
 /**
  * The built-in skills (`mcp/builtInSkills.ts`): the modeling server serves
  * them through the MCP skills extension — listed, fetched by URI and read
- * back with the digest and size of their entry — and a runtime server
- * neither declares the extension nor serves them.
+ * back with the digest and size of their entry. A runtime server serves
+ * its lens's runtime skills instead (`runtime-skills.test.ts`).
  */
 
 import { createHash } from "node:crypto";
 
 import type { Client } from "@modelcontextprotocol/client";
-import { SKILLS_EXTENSION_ID, SkillsClient } from "@modelcontextprotocol/client/ext/skills";
+import { SkillsClient } from "@modelcontextprotocol/client/ext/skills";
 import { afterEach, describe, expect, it } from "vitest";
-import { z } from "zod";
 
 import { connectServer } from "../mcpClient.js";
 import { builtInSkills } from "../../src/mcp/builtInSkills.js";
 import { createModelingMcpServer } from "../../src/mcp/modeling.js";
-import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
 
 const SKILL = "skill://property-or-relation/SKILL.md";
 
@@ -74,16 +72,5 @@ describe("the modeling server", () => {
       // Claude Code reads at most 100 KB of one text file.
       expect(file.bytes.byteLength, name).toBeLessThan(100 * 1024);
     }
-  });
-});
-
-describe("a runtime server", () => {
-  it("neither declares the skills extension nor serves a built-in skill", async () => {
-    client = await connectServer("skills-tests", () => createRuntimeMcpServer("test_ont", "all"));
-    const skills = new SkillsClient(client);
-    expect(skills.supported).toBe(false);
-    expect(client.getServerCapabilities()?.extensions?.[SKILLS_EXTENSION_ID]).toBeUndefined();
-    await expect(client.request({ method: "skills/list", params: {} }, z.object({}))).rejects.toThrow(/not found/i);
-    await expect(client.readResource({ uri: SKILL })).rejects.toThrow(/not found/i);
   });
 });

@@ -308,6 +308,23 @@ export const SearchProfileResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 
+// --- Runtime Skill ---
+
+/** A runtime skill: a skill the lens's runtime MCP mount publishes. The
+ * rules are checked by the service, shared by every entrance. */
+export const RuntimeSkillUpsert = z.object({
+  description: z.string(),
+  content: z.string(),
+});
+
+export const RuntimeSkillResponse = z.object({
+  key: z.string(),
+  description: z.string(),
+  content: z.string(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
 // --- Transfer format (export / import) ---
 // These field names ARE the interchange format — renaming one invalidates
 // every payload already written. Keys are unconstrained strings at parse
@@ -423,6 +440,14 @@ export const ExportSearchProfile = z.object({
   tree: StoredSearchTree,
 });
 
+/** A runtime skill in the transfer format. Import checks the save rules
+ * itself. */
+export const ExportRuntimeSkill = z.object({
+  key: z.string(),
+  description: z.string(),
+  content: z.string(),
+});
+
 /** One retriever in its portable form — also the single-retriever
  * export. Kept as stored: a version this release cannot run travels too. */
 export const ExportRetriever = z.object({
@@ -463,6 +488,7 @@ export const ExportLens = z.object({
   assistants: ExportAssistants.default(ExportAssistants.parse({})),
   savedQueries: z.array(ExportSavedQuery).default([]),
   searchProfiles: z.array(ExportSearchProfile).default([]),
+  skills: z.array(ExportRuntimeSkill).default([]),
 });
 
 /** The transfer format's search indices: the custom definitions and the
@@ -628,6 +654,8 @@ export type StepResponseBody = z.infer<typeof StepResponse>;
 export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
 export type SearchProfileUpsertInput = z.infer<typeof SearchProfileUpsert>;
 export type SearchProfileResponseBody = z.infer<typeof SearchProfileResponse>;
+export type RuntimeSkillUpsertInput = z.infer<typeof RuntimeSkillUpsert>;
+export type RuntimeSkillResponseBody = z.infer<typeof RuntimeSkillResponse>;
 export type ExportPayloadInput = z.infer<typeof ExportPayload>;
 export type SearchSettingsUpdateInput = z.infer<typeof SearchSettingsUpdate>;
 export type SearchSettingsResponseBody = z.infer<typeof SearchSettingsResponse>;

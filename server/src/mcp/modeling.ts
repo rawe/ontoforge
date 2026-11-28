@@ -19,13 +19,14 @@
  * detail is flattened into the message text.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type McpServerOptions } from "@modelcontextprotocol/server";
 import { z, ZodError } from "zod";
 
 import type { AccessActor } from "../access/store.js";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
+import { MAX_RUNTIME_SKILL_DESCRIPTION_LENGTH } from "../core/runtimeSkill.js";
 import {
   DEFAULT_ANSWER_FIELD_CHARACTERS,
   DEFAULT_THRESHOLD,
@@ -39,6 +40,7 @@ import {
   LENS_RESOURCE_KEY_PATTERN,
   MAX_KEY_LENGTH,
   PARENT_ENDS,
+  RUNTIME_SKILL_KEY_PATTERN,
   type ParentEnd,
   type TypeKind,
 } from "../core/schemas.js";
@@ -65,6 +67,7 @@ import { IMPORTABLE_FORMAT_VERSIONS } from "../modeling/transfer/upgrades.js";
 import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
+import { builtInSkills } from "./builtInSkills.js";
 import { definitionParameter } from "./searchIndexDefinition.js";
 
 // ---------------------------------------------------------------------------
@@ -119,6 +122,14 @@ export function formatToolError(error: unknown): string {
 // ---------------------------------------------------------------------------
 // Result and handler plumbing
 // ---------------------------------------------------------------------------
+
+/** Options of both MCP servers. A server lives for one request, so its
+ * tool list and its resources — the skills' files — never change while a
+ * client holds it: advertising `listChanged: false` keeps clients from
+ * opening a change stream. */
+export const SERVER_OPTIONS: McpServerOptions = {
+  capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
+};
 
 interface ToolResult {
   content: { type: "text"; text: string }[];
@@ -258,7 +269,8 @@ const SEARCH_INDEX_RECORD =
  * is created over REST, where its creator becomes its administrator.
  */
 export function createModelingMcpServer(ontologyKey: string, actor: AccessActor | null = null): McpServer {
-  const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
+  const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" }, SERVER_OPTIONS);
+  builtInSkills.attach(server);
   const authentication = actor !== null;
 
   // The ONE registry-touching tool over MCP (`docs/interfaces/mcp.md#how-a-mount-is-bound`): with
@@ -277,7 +289,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
           ? " This server requires sign-in: it creates no ontology; a missing one is created " +
             "through the REST API or the web client."
           : ""),
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     wrap("ensure_ontology", async () => {
       const registry = getOntologyRegistry();
@@ -297,12 +309,15 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries and search profiles.",
-      inputSchema: {},
+        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries " +
+        "and search profiles. Runtime skills are not included: read them with list_runtime_skills.",
+      inputSchema: z.object({}),
     },
     wrap("get_schema", async () => {
       const result = await service.getSchemaExport(await getModelingStore(ontologyKey));
-      return jsonResult(result);
+      // The export without each lens's runtime skills: guides, not schema.
+      const lenses = (result.lenses as Record<string, unknown>[]).map(({ skills: _skills, ...lens }) => lens);
+      return jsonResult({ ...result, lenses });
     }),
   );
 
@@ -318,14 +333,14 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "must be required with no default and shown by every lens allowlist for the type; with " +
         "cascade=True the server makes them so, otherwise the call is refused. Refused too when " +
         "stored entities lack a value or would share an identity.",
-      inputSchema: {
+      inputSchema: z.object({
         key: z.string(),
         display_name: z.string(),
         description: z.string().optional(),
         name_property: z.string().optional(),
         identity_properties: z.array(z.string()).optional(),
         cascade: z.boolean().optional(),
-      },
+      }),
     },
     wrap("create_entity_type", async (args: {
       key: string;
@@ -363,14 +378,14 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "cascade=True the server makes them so, otherwise the call is refused. Refused too when " +
         "stored entities lack a value or would share an identity. null clears the identity; omitted leaves it unchanged. Changing the " +
         "identity renames every entity's identity.",
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
         name_property: z.string().optional(),
         identity_properties: z.array(z.string()).nullable().optional(),
         cascade: z.boolean().optional(),
-      },
+      }),
     },
     wrap("update_entity_type", async (args: {
       entity_type_key: string;
@@ -405,10 +420,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Remove an entity type and its properties. Use cascade=True to auto-remove " +
         "from any scoped lenses and custom search indices (indices rooted on it are " +
         "deleted). Fails if any relation type references it.",
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         cascade: z.boolean().optional(),
-      },
+      }),
     },
     wrap("delete_entity_type", async (args: {
       entity_type_key: string;
@@ -433,7 +448,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "relation always has it, and false is refused with a parent end. A parent end is " +
         "refused when relations already stored under the key would give an entity two " +
         "parents or form a cycle, and one_per_pair when they link one pair twice.",
-      inputSchema: {
+      inputSchema: z.object({
         key: z.string(),
         display_name: z.string(),
         source_entity_type_key: z.string(),
@@ -441,7 +456,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         description: z.string().optional(),
         parent: z.enum(PARENT_ENDS).optional(),
         one_per_pair: z.boolean().optional(),
-      },
+      }),
     },
     wrap("create_relation_type", async (args: {
       key: string;
@@ -481,13 +496,13 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "stored relations would then give an entity two parents or form a cycle, and " +
         "turning one_per_pair on when they link one pair twice; clearing either is never " +
         "refused.",
-      inputSchema: {
+      inputSchema: z.object({
         relation_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
         parent: z.enum(PARENT_ENDS).nullable().optional(),
         one_per_pair: z.boolean().optional(),
-      },
+      }),
     },
     wrap("update_relation_type", async (args: {
       relation_type_key: string;
@@ -515,10 +530,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Remove a relation type and its properties. Use cascade=True to auto-remove " +
         "from any scoped lenses and the relation groups of custom search indices.",
-      inputSchema: {
+      inputSchema: z.object({
         relation_type_key: z.string(),
         cascade: z.boolean().optional(),
-      },
+      }),
     },
     wrap("delete_relation_type", async (args: {
       relation_type_key: string;
@@ -547,7 +562,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "embeddings and is returned as a stub by default in runtime reads. Document properties are only allowed on entity types " +
         "— on relation types they are rejected. " +
         "Use cascade=True to auto-add required properties to scoped lens property lists.",
-      inputSchema: {
+      inputSchema: z.object({
         type_kind: z.string(),
         type_key: z.string(),
         key: z.string(),
@@ -557,7 +572,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         default_value: z.string().optional(),
         description: z.string().optional(),
         cascade: z.boolean().optional(),
-      },
+      }),
     },
     wrap("add_property", async (args: {
       type_kind: string;
@@ -599,7 +614,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "type_kind must be 'entity_type' or 'relation_type'. " +
         "Omitted arguments stay unchanged; pass default_value as null to remove a default. " +
         "A property in its entity type's identity cannot become optional or take a default.",
-      inputSchema: {
+      inputSchema: z.object({
         type_kind: z.string(),
         type_key: z.string(),
         property_key: z.string(),
@@ -607,7 +622,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         required: z.boolean().optional(),
         default_value: z.string().nullable().optional(),
         description: z.string().optional(),
-      },
+      }),
     },
     wrap("update_property", async (args: {
       type_kind: string;
@@ -650,12 +665,12 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "custom search indices that read it (required when an index reads it). " +
         "An entity type's name property cannot be removed; reassign it first. Nor can a " +
         "property in the type's identity; change the identity first.",
-      inputSchema: {
+      inputSchema: z.object({
         type_kind: z.string(),
         type_key: z.string(),
         property_key: z.string(),
         cascade: z.boolean().optional(),
-      },
+      }),
     },
     wrap("delete_property", async (args: {
       type_kind: string;
@@ -685,8 +700,8 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
         "(JSON), including the keyword language set, the search indices and each lens's " +
-        "assistants (agents, retrievers and navigators), saved queries and search profiles.",
-      inputSchema: {},
+        "assistants (agents, retrievers and navigators), saved queries, search profiles and runtime skills.",
+      inputSchema: z.object({}),
     },
     wrap("export_schema", async () => {
       const result = await service.getSchemaExport(await getModelingStore(ontologyKey));
@@ -701,11 +716,11 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         `Import a v${TRANSFER_FORMAT_VERSION} schema payload (also accepted, upgraded on the way in: ` +
         IMPORTABLE_FORMAT_VERSIONS.filter((v) => v !== TRANSFER_FORMAT_VERSION).map((v) => `v${v}`).join(", ") +
         "). Creates entity types, relation types, and lenses with scope configuration, " +
-        "assistants, saved queries and search profiles. Answers with the created lenses and leftOutSavedQueries: " +
+        "assistants, saved queries, search profiles and runtime skills. Answers with the created lenses and leftOutSavedQueries: " +
         "the saved queries ({lens, key}) of an older payload the upgrade could not convert.",
-      inputSchema: {
+      inputSchema: z.object({
         payload: z.record(z.string(), z.unknown()),
-      },
+      }),
     },
     wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
       const result = await service.importSchema(
@@ -723,7 +738,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Get the search settings: the keyword language set keyword search stems in " +
         "(german, english or both) and the managed search indices switched off.",
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     wrap("get_search_settings", async () => {
       const result = await service.getSearchSettings(await getModelingStore(ontologyKey));
@@ -740,10 +755,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "rebuilds every index's keyword entries in the background. disabled_indices: " +
         "exactly the managed index keys (e.g. 'person~default') to switch off; every other " +
         "managed index is on.",
-      inputSchema: {
+      inputSchema: z.object({
         keyword_languages: z.array(z.string()).optional(),
         disabled_indices: z.array(z.string()).optional(),
-      },
+      }),
     },
     wrap("set_search_settings", async (args: {
       keyword_languages?: string[] | undefined;
@@ -770,7 +785,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "List the ontology's search indices — managed (default and passage, keys with '~', " +
         "switched in search settings) and custom. " + SEARCH_INDEX_RECORD,
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     wrap("list_search_indices", async () => {
       const result = await searchIndices.listSearchIndices(await getModelingStore(ontologyKey));
@@ -783,7 +798,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     {
       description:
         "Get one search index. " + SEARCH_INDEX_RECORD,
-      inputSchema: { index_key: z.string() },
+      inputSchema: z.object({ index_key: z.string() }),
     },
     wrap("get_search_index", async (args: { index_key: string }) => {
       const result = await searchIndices.getSearchIndex(
@@ -804,7 +819,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "⟦target.x⟧ and ⟦passage⟧ standing in for the values (outline notation only, not " +
         "template syntax). definition: as the input schema describes it; the key may be " +
         "omitted. Returns {valid, issues, estimate, outline}.",
-      inputSchema: { definition: definitionParameter("draft") },
+      inputSchema: z.object({ definition: definitionParameter("draft") }),
     },
     wrap("preview_search_index", async (args: { definition: Record<string, unknown> }) => {
       const result = await searchIndices.previewSearchIndex(
@@ -822,7 +837,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Create a custom search index from definition, as the input schema describes it. " +
         "An invalid definition is refused with every issue at once. Building starts in the " +
         "background.",
-      inputSchema: { definition: definitionParameter("create") },
+      inputSchema: z.object({ definition: definitionParameter("create") }),
     },
     wrap("create_search_index", async (args: { definition: Record<string, unknown> }) => {
       const result = await searchIndices.createSearchIndex(
@@ -842,7 +857,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "An invalid definition is refused with every issue at once. A changed definition is " +
         "rebuilt in the background; the current entries serve until then. Managed indices can " +
         "only be switched (set_search_settings).",
-      inputSchema: { index_key: z.string(), definition: definitionParameter("draft") },
+      inputSchema: z.object({ index_key: z.string(), definition: definitionParameter("draft") }),
     },
     wrap("update_search_index", async (args: {
       index_key: string;
@@ -863,7 +878,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Delete a custom search index with its entries. Use cascade=True to also remove it " +
         "from the scoped lenses that include it.",
-      inputSchema: { index_key: z.string(), cascade: z.boolean().optional() },
+      inputSchema: z.object({ index_key: z.string(), cascade: z.boolean().optional() }),
     },
     wrap("delete_search_index", async (args: { index_key: string; cascade?: boolean | undefined }) => {
       await searchIndices.deleteSearchIndex(
@@ -880,7 +895,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     {
       description:
         "Get a search index's build status. " + SEARCH_INDEX_STATUS,
-      inputSchema: { index_key: z.string() },
+      inputSchema: z.object({ index_key: z.string() }),
     },
     wrap("get_search_index_status", async (args: { index_key: string }) => {
       const result = await searchIndices.getSearchIndexStatusBody(
@@ -897,7 +912,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Rebuild a search index from scratch in the background (retries failed items) and " +
         "return its status.",
-      inputSchema: { index_key: z.string() },
+      inputSchema: z.object({ index_key: z.string() }),
     },
     wrap("rebuild_search_index", async (args: { index_key: string }) => {
       const result = await searchIndices.rebuildSearchIndex(
@@ -912,7 +927,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "validate_schema",
     {
       description: "Check the whole schema + all scoped lenses for consistency.",
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     wrap("validate_schema", async () => {
       const result = await service.validateAll(await getModelingStore(ontologyKey));
@@ -926,11 +941,11 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "create_lens",
     {
       description: "Create a new lens (named view over the schema).",
-      inputSchema: {
+      inputSchema: z.object({
         key: z.string(),
         name: z.string(),
         description: z.string().optional(),
-      },
+      }),
     },
     wrap("create_lens", async (args: {
       key: string;
@@ -951,11 +966,11 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "update_lens",
     {
       description: "Update a lens's display name or description.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
-      },
+      }),
     },
     wrap("update_lens", async (args: {
       lens_key: string;
@@ -979,9 +994,9 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Delete a lens, with its agents, saved queries, search profiles and changesets (changes staged and not yet committed). " +
         "Does not affect the schema, the instance data or other lenses. The result states how many changesets were deleted.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
-      },
+      }),
     },
     wrap("delete_lens", async (args: { lens_key: string }) => {
       const store = await getModelingStore(ontologyKey);
@@ -1008,11 +1023,11 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Add an entity type to a lens's scope. Properties=null means all " +
         "properties. Properties=[...] means only listed properties are exposed.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         entity_type_key: z.string(),
         properties: z.array(z.string()).optional(),
-      },
+      }),
     },
     wrap("add_entity_type_to_lens", async (args: {
       lens_key: string;
@@ -1038,10 +1053,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "remove_entity_type_from_lens",
     {
       description: "Remove an entity type from a lens's scope.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         entity_type_key: z.string(),
-      },
+      }),
     },
     wrap("remove_entity_type_from_lens", async (args: {
       lens_key: string;
@@ -1067,11 +1082,11 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Add a relation type to a lens's scope. Properties=null means all " +
         "properties. Properties=[...] means only listed properties are exposed.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         relation_type_key: z.string(),
         properties: z.array(z.string()).optional(),
-      },
+      }),
     },
     wrap("add_relation_type_to_lens", async (args: {
       lens_key: string;
@@ -1097,10 +1112,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "remove_relation_type_from_lens",
     {
       description: "Remove a relation type from a lens's scope.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         relation_type_key: z.string(),
-      },
+      }),
     },
     wrap("remove_relation_type_from_lens", async (args: {
       lens_key: string;
@@ -1127,10 +1142,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Include a search index in a lens, by index key. A scoped lens must include the " +
         "index's root entity type. Index inclusions never make a lens scoped; an unscoped " +
         "lens searches every index. get_schema lists each lens's index inclusions.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         index_key: z.string(),
-      },
+      }),
     },
     wrap("add_search_index_to_lens", async (args: { lens_key: string; index_key: string }) => {
       const store = await getModelingStore(ontologyKey);
@@ -1148,10 +1163,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "remove_search_index_from_lens",
     {
       description: "Remove a search index from a lens, by index key.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         index_key: z.string(),
-      },
+      }),
     },
     wrap("remove_search_index_from_lens", async (args: { lens_key: string; index_key: string }) => {
       const store = await getModelingStore(ontologyKey);
@@ -1168,9 +1183,9 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Validate a single lens's INCLUDES_TYPE configuration against the schema. " +
         "Warnings name what limits the search indices it includes: a root type it does not " +
         "include, properties an index reads that it hides.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
-      },
+      }),
     },
     wrap("validate_lens", async (args: { lens_key: string }) => {
       const store = await getModelingStore(ontologyKey);
@@ -1187,9 +1202,9 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "list_agents",
     {
       description: "List a lens's agents (tool-using chat assistants).",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
-      },
+      }),
     },
     wrap("list_agents", async (args: { lens_key: string }) => {
       const results = await service.listAgents(args.lens_key, await getModelingStore(ontologyKey));
@@ -1201,10 +1216,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "get_agent",
     {
       description: "Read one agent of a lens by key.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         agent_key: z.string(),
-      },
+      }),
     },
     wrap("get_agent", async (args: { lens_key: string; agent_key: string }) => {
       const result = await service.getAgent(
@@ -1224,14 +1239,14 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
         `Tools must be valid tool names (${VALID_AGENT_TOOLS_CSV}). ` +
         "Omit tools to allow all tools.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         key: z.string(),
         name: z.string(),
         description: z.string().optional(),
         system_prompt: z.string().optional(),
         tools: z.array(z.string()).optional(),
-      },
+      }),
     },
     wrap("set_agent", async (args: {
       lens_key: string;
@@ -1261,10 +1276,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "delete_agent",
     {
       description: "Delete an agent from a lens.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         agent_key: z.string(),
-      },
+      }),
     },
     wrap("delete_agent", async (args: { lens_key: string; agent_key: string }) => {
       await service.deleteAgent(args.lens_key, args.agent_key, await getModelingStore(ontologyKey));
@@ -1280,9 +1295,9 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "List a lens's retrievers (assistants that answer questions over search indices), " +
         "each with its configuration and its current validation against the lens.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
-      },
+      }),
     },
     wrap("list_retrievers", async (args: { lens_key: string }) => {
       const results = await retrievers.listRetrievers(
@@ -1300,10 +1315,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Read one retriever of a lens by key, with its configuration and its current " +
         "validation against the lens ({valid, errors, warnings}).",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         retriever_key: z.string(),
-      },
+      }),
     },
     wrap("get_retriever", async (args: { lens_key: string; retriever_key: string }) => {
       const result = await retrievers.getRetriever(
@@ -1340,17 +1355,15 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "receives. threshold (optional) — the cosine similarity a semantic match must reach, " +
         `-1 to 1, default ${DEFAULT_THRESHOLD}. answerFieldCharacters (optional) — characters of one ` +
         `answer field passed to the answer model, 100 to 2000, default ${DEFAULT_ANSWER_FIELD_CHARACTERS}. ` +
-        "Example: {indices: [{index: 'person~default'}], filters: [{id: 'city', entityType: " +
-        "'person', path: [{relationTypeKey: 'lives_in', direction: 'outgoing'}], field: 'name'}], " +
-        "answerFields: {person: ['name', 'email']}}. The configuration is checked against the " +
-        "lens; an invalid one is refused with every error at once and nothing is saved.",
-      inputSchema: {
+        "The configuration is checked against the lens; an invalid one is refused with every " +
+        "error at once and nothing is saved.",
+      inputSchema: z.object({
         lens_key: z.string(),
         key: z.string(),
         name: z.string(),
         description: z.string().optional(),
         config: z.record(z.string(), z.unknown()),
-      },
+      }),
     },
     wrap("set_retriever", async (args: {
       lens_key: string;
@@ -1379,10 +1392,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "delete_retriever",
     {
       description: "Delete a retriever from a lens.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         retriever_key: z.string(),
-      },
+      }),
     },
     wrap("delete_retriever", async (args: { lens_key: string; retriever_key: string }) => {
       await retrievers.deleteRetriever(
@@ -1400,9 +1413,9 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "list_saved_queries",
     {
       description: "List all saved queries for a lens.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
-      },
+      }),
     },
     wrap("list_saved_queries", async (args: { lens_key: string }) => {
       const results = await service.listSavedQueries(args.lens_key, await getModelingStore(ontologyKey));
@@ -1431,18 +1444,15 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' " +
         "which collects that field from all rows of a previous step's output into a list. " +
         "Parameters define top-level $param placeholders. " +
-        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). " +
-        "Example: steps=[{name:'skills', type:'search', types:['skill'], query:'$q', limit:5}, " +
-        "{name:'results', type:'oql', oql:'MATCH (p:person)-[:has_skill]->(s:skill) " +
-        "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
-      inputSchema: {
+        "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime).",
+      inputSchema: z.object({
         lens_key: z.string(),
         key: z.string(),
         name: z.string(),
         description: z.string(),
         steps: z.array(z.record(z.string(), z.unknown())),
         parameters: z.array(z.record(z.string(), z.unknown())).optional(),
-      },
+      }),
     },
     wrap("set_saved_query", async (args: {
       lens_key: string;
@@ -1473,10 +1483,10 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "delete_saved_query",
     {
       description: "Delete a saved query from a lens.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         query_key: z.string(),
-      },
+      }),
     },
     wrap("delete_saved_query", async (args: { lens_key: string; query_key: string }) => {
       await service.deleteSavedQuery(args.lens_key, args.query_key, await getModelingStore(ontologyKey));
@@ -1492,9 +1502,9 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "list_search_profiles",
     {
       description: "List the search profiles of a lens: key, name, description and stored tree of each.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
-      },
+      }),
     },
     wrap("list_search_profiles", async (args: { lens_key: string }) => {
       const results = await service.listSearchProfiles(args.lens_key, await getModelingStore(ontologyKey));
@@ -1523,17 +1533,14 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "cut {input, limit: 1-100, perEntity?}: the first limit items, perEntity passages per entity at most. " +
         "Every search node needs a cut above it; the root ranks entities or passages. '$query' in a search " +
         "node's text marks where the query goes; at least one text holds it. Indices must be searchable and " +
-        "types shown in the lens. Checked on save, every violation at its path (tree.input.inputs.0.index). " +
-        "Example: {kind:'cut', limit:10, input:{kind:'fuse', inputs:[{kind:'group', key:'entity', " +
-        "input:{kind:'keywordSearch', index:'person~default', text:'$query'}}, {kind:'group', key:'entity', " +
-        "input:{kind:'semanticSearch', index:'person~default', text:'$query'}}]}}",
-      inputSchema: {
+        "types shown in the lens. Checked on save, every violation at its path (tree.input.inputs.0.index).",
+      inputSchema: z.object({
         lens_key: z.string(),
         key: z.string(),
         name: z.string(),
         description: z.string(),
         tree: z.record(z.string(), z.unknown()),
-      },
+      }),
     },
     wrap("set_search_profile", async (args: {
       lens_key: string;
@@ -1558,14 +1565,98 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "delete_search_profile",
     {
       description: "Delete a search profile from a lens.",
-      inputSchema: {
+      inputSchema: z.object({
         lens_key: z.string(),
         profile_key: z.string(),
-      },
+      }),
     },
     wrap("delete_search_profile", async (args: { lens_key: string; profile_key: string }) => {
       await service.deleteSearchProfile(args.lens_key, args.profile_key, await getModelingStore(ontologyKey));
       return textResult(`Search profile '${args.profile_key}' deleted from lens '${args.lens_key}'.`);
+    }),
+  );
+
+  // --- Runtime Skill Tools ---
+
+  server.registerTool(
+    "list_runtime_skills",
+    {
+      description:
+        "List the runtime skills of a lens: key and description of each, by key. A runtime skill is a " +
+        "Markdown guide that the lens's runtime MCP connection publishes as a skill; get_runtime_skill " +
+        "reads one's content.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+      }),
+    },
+    wrap("list_runtime_skills", async (args: { lens_key: string }) => {
+      const results = await service.listRuntimeSkills(args.lens_key, await getModelingStore(ontologyKey));
+      return jsonResult(results.map(({ key, description }) => ({ key, description })));
+    }),
+  );
+
+  server.registerTool(
+    "get_runtime_skill",
+    {
+      description: "Read one runtime skill of a lens by key: key, description and Markdown content.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+        skill_key: z.string(),
+      }),
+    },
+    wrap("get_runtime_skill", async (args: { lens_key: string; skill_key: string }) => {
+      const result = await service.getRuntimeSkill(args.lens_key, args.skill_key, await getModelingStore(ontologyKey));
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_runtime_skill",
+    {
+      description:
+        "Create or replace a runtime skill of a lens: a Markdown guide that MCP clients connected to the " +
+        "lens's runtime MCP connection, with or without a ruleset, discover and load as a skill named by its " +
+        "key. Only that lens serves it. Key: 1 to " +
+        `${MAX_KEY_LENGTH} lowercase letters, digits and single hyphens (pattern ${RUNTIME_SKILL_KEY_PATTERN.source}), ` +
+        "no underscore; unique within the lens, so an existing key is replaced. description: 1 to " +
+        `${MAX_RUNTIME_SKILL_DESCRIPTION_LENGTH} characters saying what the skill helps with and when to use it; ` +
+        "clients show it and choose skills by it. content: the non-empty Markdown body without frontmatter; " +
+        "the server adds the name and description. Returns the skill and whether it was created.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+        key: z.string(),
+        description: z.string(),
+        content: z.string(),
+      }),
+    },
+    wrap("set_runtime_skill", async (args: {
+      lens_key: string;
+      key: string;
+      description: string;
+      content: string;
+    }) => {
+      const [result, created] = await service.upsertRuntimeSkill(
+        args.lens_key,
+        args.key,
+        { description: args.description, content: args.content },
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult({ ...result, created });
+    }),
+  );
+
+  server.registerTool(
+    "delete_runtime_skill",
+    {
+      description: "Delete a runtime skill from a lens.",
+      inputSchema: z.object({
+        lens_key: z.string(),
+        skill_key: z.string(),
+      }),
+    },
+    wrap("delete_runtime_skill", async (args: { lens_key: string; skill_key: string }) => {
+      await service.deleteRuntimeSkill(args.lens_key, args.skill_key, await getModelingStore(ontologyKey));
+      return textResult(`Runtime skill '${args.skill_key}' deleted from lens '${args.lens_key}'.`);
     }),
   );
 

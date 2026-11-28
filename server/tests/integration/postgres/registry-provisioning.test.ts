@@ -26,6 +26,7 @@ const ALL_TABLES = [
   "assistant_agent",
   "saved_query",
   "search_profile",
+  "runtime_skill",
   "assistant_retriever",
   "assistant_navigator",
   "entity",

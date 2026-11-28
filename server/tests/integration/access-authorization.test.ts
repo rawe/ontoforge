@@ -5,19 +5,21 @@
  * the caller's subject (shaped as a JWT: `jwt.<subject>.sig`). Covers the route checks (401, 403, 404), the
  * filtered lists, the creator becoming administrator, user management's
  * scope, deletes forgetting assignments, the runtime MCP mount at a
- * Reader's level, a Proposer's changesets a Writer commits and owned
+ * Reader's level, the modeling mount's skills, a lens's runtime skills at a Reader's level,
+ * a Proposer's changesets a Writer commits and owned
  * assistant threads, the Studio helper's among them.
  */
 
 import { randomUUID } from "node:crypto";
 
 import { AIMessage } from "@langchain/core/messages";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { SkillsClient } from "@modelcontextprotocol/client/ext/skills";
 import type { FastifyInstance } from "fastify";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpClient, mcpRequest } from "../mcpClient.js";
 import type { AccessStore } from "../../src/access/store.js";
 import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { createApp } from "../../src/app.js";
@@ -84,7 +86,7 @@ async function idOf(subject: string): Promise<string> {
 
 /** An MCP client on `path` as `subject`. */
 async function mcpAs(subject: string, path: string): Promise<Client> {
-  const client = new Client({ name: "access-tests", version: "0.0.1" });
+  const client = mcpClient("access-tests");
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`), {
       requestInit: { headers: { authorization: bearer(subject) } },
@@ -355,7 +357,7 @@ describe("authorization with authentication on", () => {
 
   it("a Reader's runtime MCP mount lists only reads and refuses a write call", async () => {
     const connect = async (subject: string) => {
-      const client = new Client({ name: "access-tests", version: "0.0.1" });
+      const client = mcpClient("access-tests");
       await client.connect(
         new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/fair/runtime/lenses/visitor`), {
           requestInit: { headers: { authorization: bearer(subject) } },
@@ -429,6 +431,51 @@ describe("authorization with authentication on", () => {
       expect(refused.content[0]!.text).toContain("Proposer on lens 'visitor' cannot commit");
     } finally {
       await client.close();
+    }
+  });
+
+  it("the modeling mount's built-in skills need the ontology's administrator", async () => {
+    const { headers, payload } = mcpRequest("skills/list");
+    const res = await fetch(`${baseUrl}/mcp/ontologies/fair/model`, {
+      method: "POST",
+      headers: { ...headers, authorization: bearer("alice") },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(403);
+    const client = await mcpAs("creator", "/mcp/ontologies/fair/model");
+    try {
+      const { skills } = await new SkillsClient(client).list();
+      expect(skills.map((skill) => skill.frontmatter.name)).toContain("property-or-relation");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("a Reader reads its lens's runtime skills on the runtime and a ruleset mount; never another lens's", async () => {
+    const skills = (lens: string) => `${fair}/model/lenses/${lens}/skills`;
+    expect((await as("alice", "PUT", `${skills("visitor")}/tour`, { description: "d", content: "c" })).status).toBe(403);
+    expect((await as("creator", "PUT", `${skills("visitor")}/tour`, { description: "Visitor tour.", content: "Visitor body." })).status).toBe(201);
+    expect((await as("creator", "PUT", `${skills("staff")}/tour`, { description: "Staff tour.", content: "Staff body." })).status).toBe(201);
+    expect((await as("creator", "PUT", `${skills("staff")}/staff-only`, { description: "Staff only.", content: "Secret." })).status).toBe(201);
+    expect((await as("creator", "PUT", `${fair}/runtime/rulesets/skills-r`, { writeAccess: "none" })).status).toBe(200);
+    // The maintenance list is a read of the lens's design.
+    expect(((await as("alice", "GET", skills("visitor"))).body as Json[]).map((s) => s.key)).toEqual(["tour"]);
+    expect((await as("alice", "GET", skills("staff"))).status).toBe(404);
+
+    for (const path of ["/mcp/ontologies/fair/runtime/lenses/visitor", "/mcp/ontologies/fair/runtime/lenses/visitor/rulesets/skills-r"]) {
+      const client = await mcpAs("alice", path);
+      try {
+        const reader = new SkillsClient(client);
+        expect((await reader.list()).skills.map((skill) => skill.frontmatter), path).toEqual([
+          { name: "tour", description: "Visitor tour." },
+        ]);
+        const { skill } = await reader.get("skill://tour/SKILL.md");
+        expect((await reader.read(skill)).body, path).toBe("Visitor body.");
+        await expect(reader.get("skill://staff-only/SKILL.md")).rejects.toThrow(/No skill is served/);
+        await expect(client.readResource({ uri: "skill://staff-only/SKILL.md" })).rejects.toThrow(/not found/i);
+      } finally {
+        await client.close();
+      }
     }
   });
 

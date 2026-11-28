@@ -24,6 +24,9 @@
  * its write access allows (`writeAccess.ts`): at 'propose' the eight write
  * tools require `changeset_id` and `commit_changeset` is not listed; at
  * 'none' only the reads and the changeset reads are.
+ *
+ * Every runtime server also serves its lens's runtime skills through the
+ * MCP skills extension (`runtimeSkills.ts`), at every level.
  */
 
 import {
@@ -36,7 +39,7 @@ import {
   toolMethods,
 } from "../runtime/search/tools.js";
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type StandardSchemaWithJSON, type ToolCallback } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { settings } from "../config.js";
@@ -45,6 +48,7 @@ import { roleRefusal } from "../access/authorize.js";
 import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore, type WriteAccess } from "../core/ports.js";
 import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
+import { loadSchema } from "../runtime/schemaCache.js";
 import { filterRules } from "../runtime/readHelpers.js";
 import * as changesets from "../runtime/changesets.js";
 import * as service from "../runtime/service.js";
@@ -57,7 +61,8 @@ import {
   type Binding,
   type Operation,
 } from "../runtime/writeAccess.js";
-import { formatToolError } from "./modeling.js";
+import { formatToolError, SERVER_OPTIONS } from "./modeling.js";
+import { runtimeSkillsExtension } from "./runtimeSkills.js";
 
 interface ToolResult {
   content: { type: "text"; text: string }[];
@@ -204,7 +209,11 @@ type ToolFactory = <Args>(
 ) => (args: Args) => Promise<ToolResult>;
 
 /** Register a tool, listed only when the binding's level allows it. */
-type Register = McpServer["registerTool"];
+type Register = <Args extends StandardSchemaWithJSON>(
+  name: string,
+  config: { description: string; inputSchema: Args },
+  cb: ToolCallback<Args>,
+) => void;
 
 /** The caller's role on the lens, before anything else: a Reader (level
  * `none`) only reads, a Proposer (`propose`) only stages. Authentication
@@ -244,8 +253,17 @@ export function createRuntimeMcpServer(
   roleLevel: WriteAccess = "full",
   listedRoleLevel: WriteAccess = roleLevel,
 ): McpServer {
-  const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" });
+  const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" }, SERVER_OPTIONS);
   const { rulesetKey } = binding;
+
+  // The lens's runtime skills, at every role and ruleset level: reading
+  // them is a read of the lens's design. A ruleset mount first checks its
+  // ruleset, as a tool call does.
+  runtimeSkillsExtension(async () => {
+    const store = await getRuntimeStore(ontologyKey);
+    if (rulesetKey !== null) await readMountRuleset(lensKey, rulesetKey, store);
+    return (await loadSchema(lensKey, store)).runtimeSkills;
+  }).attach(server);
 
   const openStore = async (operation: Operation): Promise<RuntimeStore> => {
     const store = await getRuntimeStore(ontologyKey);
@@ -269,7 +287,6 @@ export function createRuntimeMcpServer(
   const register: Register = (name, config, cb) => {
     const registered = server.registerTool(name, config, cb);
     if (!lists(name)) registered.remove();
-    return registered;
   };
 
   // What the list offers: the lower of the binding's level and the caller's role.
@@ -310,7 +327,7 @@ export function createRuntimeMcpServer(
           "does not show the anchor entity, so every write is refused. When the anchor entity is " +
           "deleted or not visible, type, id and name are null and path is empty. path lists the " +
           "anchor entity's visible ancestors, root first, ending with the entity. Read-only.",
-        inputSchema: {},
+        inputSchema: z.object({}),
       },
       tool("get_ruleset", async () =>
         jsonResult(await getRulesetView(lensKey, rulesetKey, await getRuntimeStore(ontologyKey))),
@@ -328,7 +345,7 @@ export function createRuntimeMcpServer(
         "`target`) whose entity is the parent of the entity at the other end; null " +
         "means an ordinary relation." +
         (rulesetKey === null ? " Call this first." : " Call this after get_ruleset."),
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     tool("get_schema", async (_args, open) => {
       const result = await service.getLensSchema(lensKey, await open());
@@ -361,7 +378,7 @@ export function createRuntimeMcpServer(
         " With 'parent_relation' and 'changeset_id', two objects are staged, the entity and its " +
         "parent relation, and the answer is {id, relation: {id}}; the relation is a staged " +
         "relation like any other, which later writes may name.",
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         properties: z.record(z.string(), z.unknown()),
         parent_relation: z
@@ -373,7 +390,7 @@ export function createRuntimeMcpServer(
           })
           .optional(),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool(
       "create_entity",
@@ -431,7 +448,7 @@ export function createRuntimeMcpServer(
         filterRules({ contains: true, relations: true }) +
         " To bind two conditions to one relation use execute_query. 'fields' selects the " +
         "properties returned, plus _id always.",
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         search: z.string().optional(),
         filters: z.record(z.string(), z.unknown()).optional(),
@@ -441,7 +458,7 @@ export function createRuntimeMcpServer(
         limit: z.number().optional(),
         offset: z.number().optional(),
         fields: z.array(z.string()).optional(),
-      },
+      }),
     },
     tool(
       "list_entities",
@@ -489,12 +506,12 @@ export function createRuntimeMcpServer(
         "Omit for all fields. Document properties appear as " +
         '{"document": true, "length": N} stubs — read their content with the ' +
         "get_document tool." + ENTITY_ADDRESS,
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
         fields: z.array(z.string()).optional(),
-      },
+      }),
     },
     tool(
       "get_entity",
@@ -526,11 +543,11 @@ export function createRuntimeMcpServer(
         "itself. A root's path is the entity alone. The path starts below the " +
         "nearest ancestor this connection cannot see, so it names only visible " +
         "entities. name is null when the entity has no name value." + ENTITY_ADDRESS,
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
-      },
+      }),
     },
     tool("get_path", async (args: EntityArgs, open) => {
       const store = await open();
@@ -549,14 +566,14 @@ export function createRuntimeMcpServer(
         "'offset' and 'limit' are character-based; omit both to read the full " +
         "document. Pass a search_documents passage's property, charOffset and charLength (or a " +
         "search passage match's) as property_key, offset and limit to read exactly that passage." + ENTITY_ADDRESS,
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
         property_key: z.string(),
         offset: z.number().optional(),
         limit: z.number().optional(),
-      },
+      }),
     },
     tool(
       "get_document",
@@ -596,13 +613,13 @@ export function createRuntimeMcpServer(
         "inside a document." +
         ENTITY_ADDRESS +
         staged("update"),
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
         properties: z.record(z.string(), z.unknown()),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool(
       "update_entity",
@@ -648,7 +665,7 @@ export function createRuntimeMcpServer(
         "range, and ~200 chars of context around the edit for verification." +
         ENTITY_ADDRESS +
         staged("edit"),
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
@@ -657,7 +674,7 @@ export function createRuntimeMcpServer(
         new_string: z.string(),
         replace_all: z.boolean().optional(),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool(
       "edit_document",
@@ -715,7 +732,7 @@ export function createRuntimeMcpServer(
         "edited range, and ~200 chars of context around the edit." +
         ENTITY_ADDRESS +
         staged("edit"),
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
@@ -725,7 +742,7 @@ export function createRuntimeMcpServer(
         content: z.string(),
         expect: z.string().optional(),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool(
       "write_document",
@@ -784,12 +801,12 @@ export function createRuntimeMcpServer(
         staged("delete") +
         " A staged entity delete also takes out every relation staged in the changeset at that " +
         "entity, and the answer lists their ids as cascaded.",
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool("delete_entity", async (args: EntityArgs & { changeset_id?: string | undefined }, open) => {
       if (args.changeset_id !== undefined) {
@@ -824,7 +841,7 @@ export function createRuntimeMcpServer(
         "'to_entity_id') or by its identity ('from_entity_identity', 'to_entity_identity'), " +
         "exactly one per end; prefer the identity when the end's type has one." +
         staged("create"),
-      inputSchema: {
+      inputSchema: z.object({
         relation_type_key: z.string(),
         from_entity_id: z.string().optional(),
         to_entity_id: z.string().optional(),
@@ -832,7 +849,7 @@ export function createRuntimeMcpServer(
         to_entity_identity: z.string().optional(),
         properties: z.record(z.string(), z.unknown()).optional(),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool(
       "create_relation",
@@ -881,7 +898,7 @@ export function createRuntimeMcpServer(
         "not both of a pair). " +
         filterRules({ contains: true, relations: false }) +
         " The properties are the relation's own.",
-      inputSchema: {
+      inputSchema: z.object({
         relation_type_key: z.string(),
         from_entity_id: z.string().optional(),
         to_entity_id: z.string().optional(),
@@ -893,7 +910,7 @@ export function createRuntimeMcpServer(
         order: z.enum(["asc", "desc"]).optional(),
         limit: z.number().optional(),
         offset: z.number().optional(),
-      },
+      }),
     },
     tool(
       "list_relations",
@@ -942,10 +959,10 @@ export function createRuntimeMcpServer(
     "get_relation",
     {
       description: "Retrieve a specific relation by its _id.",
-      inputSchema: {
+      inputSchema: z.object({
         relation_type_key: z.string(),
         relation_id: z.string(),
-      },
+      }),
     },
     tool("get_relation", async (args: { relation_type_key: string; relation_id: string }, open) => {
       const result = await service.getRelation(
@@ -965,12 +982,12 @@ export function createRuntimeMcpServer(
         "Partial update of relation properties. Cannot change connected entities — " +
         "delete and recreate instead." +
         staged("update"),
-      inputSchema: {
+      inputSchema: z.object({
         relation_type_key: z.string(),
         relation_id: z.string(),
         properties: z.record(z.string(), z.unknown()),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool(
       "update_relation",
@@ -1005,11 +1022,11 @@ export function createRuntimeMcpServer(
     "delete_relation",
     {
       description: "Delete a relation. Connected entities are unaffected." + staged("delete"),
-      inputSchema: {
+      inputSchema: z.object({
         relation_type_key: z.string(),
         relation_id: z.string(),
         changeset_id: changesetIdParam,
-      },
+      }),
     },
     tool("delete_relation", async (args: { relation_type_key: string; relation_id: string; changeset_id?: string | undefined }, open) => {
       if (args.changeset_id !== undefined) {
@@ -1039,7 +1056,7 @@ export function createRuntimeMcpServer(
         "connecting relations. Use 'fields' to project entity properties (neighbor " +
         "entities always include _entityTypeKey). Use 'relation_fields' to project " +
         "relation properties." + ENTITY_ADDRESS,
-      inputSchema: {
+      inputSchema: z.object({
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
         entity_identity: z.string().optional(),
@@ -1048,7 +1065,7 @@ export function createRuntimeMcpServer(
         limit: z.number().optional(),
         fields: z.array(z.string()).optional(),
         relation_fields: z.array(z.string()).optional(),
-      },
+      }),
     },
     tool(
       "get_neighbors",
@@ -1094,9 +1111,9 @@ export function createRuntimeMcpServer(
         "_entityTypeKey, _relationTypeKey, _createdAt, _updatedAt) are always " +
         "available. " +
         "Example: MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, c LIMIT 10",
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string(),
-      },
+      }),
     },
     tool("execute_query", async (args: { query: string }, open) => {
       const result = await service.executeQuery(
@@ -1119,7 +1136,7 @@ export function createRuntimeMcpServer(
         "relationType, direction and label), documentProperty (the document an index reads passages of, " +
         "the property_key for get_document), modes and " +
         "status (ready, building, stale, failed, unavailable; an index not yet built finds nothing).",
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     tool("list_search_indices", async (_args, open) =>
       jsonResult(await service.searchIndexCatalog(lensKey, await open())),
@@ -1138,13 +1155,13 @@ export function createRuntimeMcpServer(
         filterRules({ contains: false, relations: true }) + " " +
         SEARCH_FILTER_EFFECT + " limit: an integer 1–100, default 10. " +
         ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string(),
         types: z.array(z.string()).optional(),
         indices: z.array(z.string()).optional(),
         filters: filtersArgument,
         limit: z.number().optional(),
-      },
+      }),
     },
     tool("search", async (args: SearchToolArgs, open) => {
       const store = await open();
@@ -1178,7 +1195,7 @@ export function createRuntimeMcpServer(
         "limit: passages, an integer 1–100, default 10. per_entity: max passages per entity " +
         "(1 to limit; omit: no cap). text: false omits the passage text. " +
         PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string(),
         types: z.array(z.string()).optional(),
         documents: z.array(z.string()).optional(),
@@ -1187,7 +1204,7 @@ export function createRuntimeMcpServer(
         limit: z.number().optional(),
         per_entity: z.number().optional(),
         text: z.boolean().optional(),
-      },
+      }),
     },
     tool("search_documents", async (args: SearchToolArgs, open) => {
       const store = await open();
@@ -1216,7 +1233,7 @@ export function createRuntimeMcpServer(
         "Discover available pre-defined queries and their required parameters. " +
         "Each saved query has a key, name, description, and parameter definitions " +
         "with name, description, and dataType.",
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     tool("list_saved_queries", async (_args, open) => {
       const result = await service.listSavedQueries(lensKey, await open());
@@ -1233,10 +1250,10 @@ export function createRuntimeMcpServer(
         "parameters first. Answers with the last step's output: {columns, results} for an " +
         "oql step; for a search step {ran, items, limitations}, each item a rank, the " +
         "found entity (_id, _entityTypeKey, name) and the entry that matched.",
-      inputSchema: {
+      inputSchema: z.object({
         query_key: z.string(),
         params: z.record(z.string(), z.unknown()).optional(),
-      },
+      }),
     },
     tool(
       "run_saved_query",
@@ -1260,9 +1277,9 @@ export function createRuntimeMcpServer(
         "description. Returns the most relevant saved queries ranked by how well " +
         "their description matches. Use this to find the right saved query for a " +
         "user's intent.",
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string(),
-      },
+      }),
     },
     tool("search_saved_queries", async (args: { query: string }, open) => {
       const result = await service.searchSavedQueries(
@@ -1284,7 +1301,7 @@ export function createRuntimeMcpServer(
         "a query text. Each has key, name, description (what it finds — choose by it), result " +
         "('entities' or 'passages': what a run returns) and types (the entity types it searches; " +
         "filters apply to these). Read-only.",
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     tool("list_search_profiles", async (_args, open) =>
       jsonResult(await service.listSearchProfiles(lensKey, await open())),
@@ -1302,11 +1319,11 @@ export function createRuntimeMcpServer(
         "entity types (a passage's: its document's entity); a key none of them resolves is refused. " +
         SEARCH_FILTER_EFFECT + " " + SEARCH_PROFILE_RESPONSE + " Items are candidates, not verified answers. " +
         "Read-only.",
-      inputSchema: {
+      inputSchema: z.object({
         key: z.string(),
         query: z.string(),
         filters: filtersArgument,
-      },
+      }),
     },
     tool(
       "run_search_profile",
@@ -1383,7 +1400,7 @@ function registerChangesetTools(
             "through the lens without a ruleset, and if the ruleset sets an anchor, its commit " +
             "keeps every write in the anchor's subtree."
           : " Only connections to this lens without a ruleset reach it."),
-      inputSchema: { note: z.string().optional() },
+      inputSchema: z.object({ note: z.string().optional() }),
     },
     tool("start_changeset", async (args: { note?: string | undefined }, open) =>
       jsonResult(await changesets.startChangeset(lensKey, rulesetKey, args.note, await open())),
@@ -1409,7 +1426,7 @@ function registerChangesetTools(
         "committed or discarded, or when it expires after 7 days unchanged as a draft. A " +
         "submitted changeset can be neither discarded nor expire, so one that left the list " +
         "was committed.",
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     tool("list_changesets", async (_args, open) =>
       jsonResult(await changesets.listChangesets(lensKey, rulesetKey, await open())),
@@ -1443,11 +1460,11 @@ function registerChangesetTools(
         "firstTouchedAt and markers." +
         (lists("commit_changeset") ? " To commit exactly what you read, pass version as expected_version to commit_changeset." : "") +
         reach(rulesetKey),
-      inputSchema: {
+      inputSchema: z.object({
         changeset_id: z.string(),
         offset: z.number().optional(),
         limit: z.number().optional(),
-      },
+      }),
     },
     tool(
       "get_changeset",
@@ -1478,14 +1495,14 @@ function registerChangesetTools(
         "value of that property, when it deletes the entity, or when this lens does not show " +
         "the entity type or the property." +
         reach(rulesetKey),
-      inputSchema: {
+      inputSchema: z.object({
         changeset_id: z.string(),
         entity_type_key: z.string(),
         entity_id: z.string(),
         property_key: z.string(),
         offset: z.number().optional(),
         limit: z.number().optional(),
-      },
+      }),
     },
     tool(
       "get_staged_document",
@@ -1525,7 +1542,7 @@ function registerChangesetTools(
         "Taking out a delete brings back nothing it dropped. A submitted changeset refuses it. " +
         "An object or value the changeset does not stage is not found." +
         reach(rulesetKey),
-      inputSchema: { changeset_id: z.string(), object_id: z.string(), property: z.string().optional() },
+      inputSchema: z.object({ changeset_id: z.string(), object_id: z.string(), property: z.string().optional() }),
     },
     tool(
       "unstage",
@@ -1560,11 +1577,11 @@ function registerChangesetTools(
         "changeset; an object, a value or a target that is gone is not found. Returns the object " +
         "as get_changeset shows it." +
         reach(rulesetKey),
-      inputSchema: {
+      inputSchema: z.object({
         changeset_id: z.string(),
         object_id: z.string(),
         properties: z.array(z.string()).optional(),
-      },
+      }),
     },
     tool(
       "rebase",
@@ -1602,7 +1619,7 @@ function registerChangesetTools(
           : ` This connection has write access '${binding.writeAccess}' and cannot commit: submitting hands the ` +
             "changeset to a person, who commits it or sends it back.") +
         reach(rulesetKey),
-      inputSchema: { changeset_id: z.string(), note: z.string().optional() },
+      inputSchema: z.object({ changeset_id: z.string(), note: z.string().optional() }),
     },
     tool("submit_changeset", async (args: { changeset_id: string; note?: string | undefined }, open) =>
       jsonResult(
@@ -1626,7 +1643,7 @@ function registerChangesetTools(
         (rulesetKey !== null ? " It works while the ruleset's anchor entity no longer exists." : "") +
         ` Returns the changeset: ${CHANGESET_FIELDS}; state is 'draft'.` +
         reach(rulesetKey),
-      inputSchema: { changeset_id: z.string(), note: z.string() },
+      inputSchema: z.object({ changeset_id: z.string(), note: z.string() }),
     },
     tool("unsubmit_changeset", async (args: { changeset_id: string; note: string }, open) =>
       jsonResult(
@@ -1649,7 +1666,7 @@ function registerChangesetTools(
         "Refused while another commit or check runs on this ontology or the changeset is busy: " +
         "try again." +
         reach(rulesetKey),
-      inputSchema: { changeset_id: z.string() },
+      inputSchema: z.object({ changeset_id: z.string() }),
     },
     tool("check_changeset", async (args: { changeset_id: string }, open) =>
       jsonResult(await changesets.checkChangeset(lensKey, rulesetKey, args.changeset_id, await open())),
@@ -1684,7 +1701,7 @@ function registerChangesetTools(
         "submitted changeset that is no longer listed was committed, and one still listed is " +
         "not committed." +
         reach(rulesetKey),
-      inputSchema: { changeset_id: z.string(), expected_version: z.number().int().optional() },
+      inputSchema: z.object({ changeset_id: z.string(), expected_version: z.number().int().optional() }),
     },
     tool("commit_changeset", async (args: { changeset_id: string; expected_version?: number | undefined }, open) =>
       jsonResult(
@@ -1706,7 +1723,7 @@ function registerChangesetTools(
         "Delete a draft changeset and all its staged objects; the data is not touched, and it " +
         "cannot be undone. A submitted changeset is refused until it is unsubmitted." +
         reach(rulesetKey),
-      inputSchema: { changeset_id: z.string() },
+      inputSchema: z.object({ changeset_id: z.string() }),
     },
     tool("discard_changeset", async (args: { changeset_id: string }, open) => {
       await changesets.discardChangeset(lensKey, rulesetKey, args.changeset_id, await open());

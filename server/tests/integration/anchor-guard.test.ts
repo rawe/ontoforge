@@ -9,11 +9,11 @@
  * applies on the next call.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
@@ -137,7 +137,7 @@ function mcpWrites(url: string): Writes {
   let client: Promise<Client> | null = null;
   const connect = () => {
     client ??= (async () => {
-      const c = new Client({ name: "anchor-guard-tests", version: "0.0.1" });
+      const c = mcpClient("anchor-guard-tests");
       await c.connect(new StreamableHTTPClientTransport(new URL(url)));
       clients.push(c);
       return c;

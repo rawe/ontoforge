@@ -217,6 +217,7 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     getAgentConfigs: vi.fn(async () => []),
     getSavedQueries: vi.fn(async () => []),
     getSearchProfiles: vi.fn(async () => []),
+    getRuntimeSkills: vi.fn(async () => []),
     createEntity: vi.fn(),
     listEntities: vi.fn(async () => [[], 0]),
     getEntity: vi.fn(async () => null),

@@ -84,6 +84,14 @@ claude --mcp-config mcp-example.json
 }
 ```
 
+Codex CLI connects only with its `mcp_2026_07_28` feature enabled, for the
+[protocol revision](docs/interfaces/mcp.md) the servers speak:
+
+```bash
+codex --enable mcp_2026_07_28 \
+  -c 'mcp_servers.ontoforge-modeling.url="http://localhost:8000/mcp/ontologies/my_ontology/model"'
+```
+
 With authentication on, connect through the server's public address (`PUBLIC_URL`,
 e.g. `http://localhost:8000/mcp/ontologies/my_ontology/model`) and leave out any token:
 an OAuth-capable client signs in through the browser on first connect.

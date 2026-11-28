@@ -1,8 +1,8 @@
 # MCP
 
 Two servers, mounted in the same process as REST and calling the same services directly.
-Both use stateless HTTP with plain JSON responses, so one mount serves many clients and
-no connection carries state. The deployment and transport choice is explained in
+Both speak MCP protocol revision 2026-07-28, and only that revision, over stateless HTTP
+with plain JSON responses, so one mount serves many clients and no connection carries state. The deployment and transport choice is explained in
 [ADR 0005](../adr/0005-mcp-in-process-stateless-http.md). Modeling and runtime remain separate
 servers: no client reaches both through one MCP connection.
 
@@ -10,8 +10,9 @@ servers: no client reaches both through one MCP connection.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 34; 35 on a ruleset mount, 34 with write access `propose`, 19 with `none` or for a Reader; 33 for a Proposer, 34 on a ruleset mount |
+| Tools | 52 | 36; 37 on a ruleset mount, 36 with write access `propose`, 21 with `none`; 20 for a Reader, 21 on a ruleset mount; 35 for a Proposer, 36 on a ruleset mount |
 | Sign-in, authentication on | Bearer token of an Ontology Administrator | Bearer token of a Reader, Proposer or Writer on the lens |
+| [Skills](#skills) | Built-in | The lens's runtime skills |
 
 ## How a mount is bound
 
@@ -48,7 +49,7 @@ otherwise, reads included.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation. With authentication on it creates nothing |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, search profiles, retrievers and navigators. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, search profiles, retrievers and navigators. The `export_schema` payload without each lens's runtime skills, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`), optionally with an identity (`identity_properties`) |
 | `update_entity_type` | Change display name, description, name property (`name_property`) or identity (`identity_properties`; null clears it); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
@@ -95,6 +96,10 @@ otherwise, reads included.
 | `list_search_profiles` | List a lens's search profiles, each with its tree |
 | `set_search_profile` | Create or replace a search profile from a `tree` in the REST wire format; every violation is refused in one message |
 | `delete_search_profile` | Delete a search profile, by `profile_key` |
+| `list_runtime_skills` | List a lens's runtime skills: key and description of each |
+| `get_runtime_skill` | Read one runtime skill with its content, by `skill_key` |
+| `set_runtime_skill` | Create or replace a runtime skill from a `description` and `content` |
+| `delete_runtime_skill` | Delete a runtime skill, by `skill_key` |
 
 The per-lens tools take a `lens_key` naming a lens of the bound ontology.
 `create_entity_type`, `update_entity_type`, `add_property`, `delete_property`, `delete_entity_type`,
@@ -104,6 +109,31 @@ meaning as the REST parameter. The search-index tools take the index key as
 `set_retriever` writes the current configuration version, so it takes no version argument.
 Copying, moving, exporting and importing a single retriever are REST only.
 There is no modeling tool for the search-data rebuild (`rebuild-search-data`).
+
+## Skills
+
+Both mounts serve skills through the MCP skills extension: guides in the Agent Skill
+format, a `SKILL.md` with a name and a description. A client lists them with
+`skills/list`, fetches one with `skills/get` and reads its files as resources under
+`skill://`. Neither mount announces changes to them.
+
+The modeling mount serves the **built-in skills**, which ship with the server and teach a
+modeler how to design a schema. With authentication on, skill requests need the Ontology
+Administrator the tools need.
+
+A runtime mount serves its lens's **runtime skills**, the ruleset mounts included, and no
+built-in skill; a lens without runtime skills lists none. Every lens role may read them.
+What they hold and which lens's skills a mount reaches:
+[capabilities/runtime-skills.md](../capabilities/runtime-skills.md#publishing).
+
+The built-in skills:
+
+| Skill | Guides |
+|---|---|
+| `lens-scoping` | Designing a lens: unscoped or scoped, the scoping matrix, property allowlists, search-index inclusions and a safe order of calls |
+| `property-or-relation` | Whether a value becomes a property or a relation to an entity type of its own: a checklist, the trade-offs, and the modeling tool calls for each choice |
+| `schema-changes` | Changing an existing schema: what never changes and how to work around it, what deleting leaves behind, cascade consent and the changes nothing checks |
+| `search-design` | Making data findable: managed or custom search indices, relation groups, header and templates, and search profiles, retrievers and saved queries, with examples |
 
 ## Runtime tools
 

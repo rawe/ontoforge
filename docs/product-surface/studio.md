@@ -136,8 +136,9 @@ unscoped and therefore exposes everything.
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens (on the page matching the open tab, as the surface switch does), and deletion behind a confirmation stating that the lens, its
-scope, its agents, retrievers, navigators, saved queries, search profiles and changesets,
-submitted ones included, go — while the schema and all instance data stay. Seven tabs:
+scope, its agents, retrievers, navigators, saved queries, search profiles, runtime skills
+and changesets, submitted ones included, go — while the schema and all instance data stay.
+Eight tabs:
 
 **Scope** — the [scope editor](schema-editing.md#scope-editor).
 
@@ -190,6 +191,14 @@ tree, one search per index and method with the text `$query`, which is then edit
 Start over returns to that choice. Saving shows the server's reasons in a summary and each
 on the card it names; leaving with unsaved changes asks first. A JSON switch shows the
 tree as it is saved, read-only, with a copy button.
+
+**Skills** — the authoring surface for the lens's
+[runtime skills](../capabilities/runtime-skills.md). The list shows each one's key and
+description. The editor (`?skill=<key>`, a draft `?skill=_new`) holds the key — typed, and
+immutable once saved — the description with a character count, and the content in a
+Markdown editor with a preview. Each field names a broken rule as it is edited; the
+server's reasons show in a summary. Delete and leaving with unsaved changes ask first. A
+help button explains how a client lists a skill, loads it and picks up a saved change.
 
 **Connect** — a ready-to-paste AI-client configuration for the MCP servers, bound
 entirely by their URLs: the modeling server to this ontology, the runtime server to this
@@ -310,7 +319,7 @@ Three operations, each with its own explanation. See
 
 - **Export** — downloads the ontology's whole design — entity types, relation types,
   properties, search indices, keyword languages, lenses, agents, retrievers, navigators,
-  saved queries and search profiles — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
+  saved queries, search profiles and runtime skills — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
 - **Import** — takes a JSON file and writes it into the current ontology. It reports
   malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and

@@ -30,6 +30,7 @@ import {
   ValidationError,
 } from "../core/exceptions.js";
 import { storedTreeErrors, type StoredSearchNode } from "../core/searchProfile.js";
+import { runtimeSkillFieldErrors, runtimeSkillKeyErrors } from "../core/runtimeSkill.js";
 import { RETRIEVER_CONFIG_VERSION, RetrieverConfig } from "../core/retriever.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RelationRules, RelationRuleViolation, RuntimeStore } from "../core/ports.js";
@@ -109,6 +110,8 @@ import type {
   LensUpdateInput,
   SearchProfileResponseBody,
   SearchProfileUpsertInput,
+  RuntimeSkillResponseBody,
+  RuntimeSkillUpsertInput,
   PropertyDefinitionCreateInput,
   PropertyDefinitionResponseBody,
   PropertyDefinitionUpdateInput,
@@ -1806,6 +1809,11 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
       description: profile.description,
       tree: profile.tree,
     }));
+    exported.skills = (await store.listRuntimeSkills(lens.lensId as string)).map((skill) => ({
+      key: skill.key,
+      description: skill.description,
+      content: skill.content,
+    }));
     lenses.push(exported);
   }
 
@@ -1825,7 +1833,8 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
 
 /**
  * Import a transfer payload: create the types, then the lenses
- * with their inclusions, assistants, saved queries and search profiles.
+ * with their inclusions, assistants, saved queries, search profiles and
+ * runtime skills.
  *
  * Validate-then-write: the ENTIRE payload is
  * validated before anything is written — every rule violation collected
@@ -2146,6 +2155,19 @@ export async function importSchema(
     }
   }
 
+  // Runtime skills: every save rule, a key once per lens.
+  for (const lens of payload.lenses) {
+    const seen = new Set<string>();
+    for (const skill of lens.skills) {
+      if (seen.has(skill.key)) errors.push(`Import error: duplicate runtime skill '${skill.key}' in lens '${lens.key}'`);
+      seen.add(skill.key);
+      for (const error of runtimeSkillKeyErrors(skill.key)) errors.push(`Import error: ${error}`);
+      for (const error of runtimeSkillFieldErrors(skill.description, skill.content)) {
+        errors.push(`Import error: runtime skill '${skill.key}' of lens '${lens.key}': ${error}`);
+      }
+    }
+  }
+
   // Search indices: each custom definition valid against the payload's
   // own schema, each switch naming a managed index it derives, each lens's
   // index inclusion naming an index of either kind.
@@ -2359,6 +2381,10 @@ export async function importSchema(
           lens.key,
           embeddings.get(sq) ?? null,
         );
+      }
+
+      for (const skill of lens.skills) {
+        await target.upsertRuntimeSkill(lensId, randomUUID(), skill.key, skill.description, skill.content);
       }
 
       createdLenses.push(toLensResponse(lensData));
@@ -2987,6 +3013,76 @@ export async function deleteSearchProfile(
     const deleted = await s.deleteSearchProfile(lens.lensId as string, key);
     if (!deleted) {
       throw new NotFoundError(`Search profile '${key}' not found`);
+    }
+  });
+}
+
+// --- Runtime skills (addressed by lens key + key) ---
+
+function toRuntimeSkillResponse(data: Row): RuntimeSkillResponseBody {
+  return {
+    key: data.key as string,
+    description: data.description as string,
+    content: data.content as string,
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+export async function listRuntimeSkills(
+  lensKey: string,
+  store: ModelingStore,
+): Promise<RuntimeSkillResponseBody[]> {
+  const lens = await resolveLensByKey(store, lensKey);
+  const rows = await store.listRuntimeSkills(lens.lensId as string);
+  return rows.map(toRuntimeSkillResponse);
+}
+
+export async function getRuntimeSkill(
+  lensKey: string,
+  key: string,
+  store: ModelingStore,
+): Promise<RuntimeSkillResponseBody> {
+  const lens = await resolveLensByKey(store, lensKey);
+  const row = (await store.listRuntimeSkills(lens.lensId as string)).find((data) => data.key === key);
+  if (!row) {
+    throw new NotFoundError(`Runtime skill '${key}' not found`);
+  }
+  return toRuntimeSkillResponse(row);
+}
+
+/**
+ * Upsert by key (`docs/capabilities/runtime-skills.md`). Returns
+ * `[response, created]`. Every rule the key, description and content break
+ * is collected into one validation error.
+ */
+export async function upsertRuntimeSkill(
+  lensKey: string,
+  key: string,
+  body: RuntimeSkillUpsertInput,
+  store: ModelingStore,
+): Promise<[RuntimeSkillResponseBody, boolean]> {
+  const errors = [...runtimeSkillKeyErrors(key), ...runtimeSkillFieldErrors(body.description, body.content)];
+  if (errors.length > 0) {
+    throw new ValidationError(`Runtime skill '${key}' validation failed`, { errors });
+  }
+  const [data, created] = await store.changeDesign(async (s) => {
+    const lens = await resolveLensByKey(s, lensKey);
+    return s.upsertRuntimeSkill(lens.lensId as string, randomUUID(), key, body.description, body.content);
+  });
+  return [toRuntimeSkillResponse(data), created];
+}
+
+export async function deleteRuntimeSkill(
+  lensKey: string,
+  key: string,
+  store: ModelingStore,
+): Promise<void> {
+  await store.changeDesign(async (s) => {
+    const lens = await resolveLensByKey(s, lensKey);
+    const deleted = await s.deleteRuntimeSkill(lens.lensId as string, key);
+    if (!deleted) {
+      throw new NotFoundError(`Runtime skill '${key}' not found`);
     }
   });
 }

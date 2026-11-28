@@ -10,11 +10,10 @@
  * the docker-compose database.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { connectServer } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
@@ -83,10 +82,7 @@ async function get(url: string): Promise<any> {
 
 /** `search` through the lens: its answer, or its refusal's text. */
 async function search(args: object, lens = "all"): Promise<{ isError: boolean; text: string; body?: Row }> {
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await createRuntimeMcpServer(O, lens).connect(serverTransport);
-  const client = new Client({ name: "runtime-search-api", version: "0.0.1" });
-  await client.connect(clientTransport);
+  const client = await connectServer("runtime-search-api", () => createRuntimeMcpServer(O, lens));
   try {
     const result = (await client.callTool({ name: "search", arguments: { ...args } })) as {
       content: { text: string }[];

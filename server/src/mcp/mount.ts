@@ -24,14 +24,17 @@
  * a runtime server is built with the caller's role (`lensLevel`): a
  * Reader lists and calls only reads, below the ruleset's level too.
  *
- * Transport is Streamable HTTP, STATELESS, with plain JSON responses
- * (no SSE), per `docs/interfaces/mcp.md#mcp`: a fresh server +
- * transport pair serves each request, so one mount serves many clients
- * and no connection carries state.
+ * Each request is served on its own, per `docs/interfaces/mcp.md#mcp`:
+ * the route builds a fresh server from the request and the SDK's serving
+ * entry answers the request with it in plain JSON, so one mount serves
+ * many clients and no connection carries state. Only POST is routed:
+ * nothing is served over GET or DELETE.
  */
 
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+import { toNodeHandler } from "@modelcontextprotocol/node";
+import { createMcpHandler, type McpServer } from "@modelcontextprotocol/server";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { lensLevel } from "../access/authorize.js";
@@ -42,38 +45,24 @@ import { createModelingMcpServer } from "./modeling.js";
 import type { Binding } from "../runtime/writeAccess.js";
 import { createRuntimeMcpServer } from "./runtime.js";
 
-/** Serve one stateless MCP request with a fresh server + transport pair. */
-async function handleMcpRequest(
-  server: McpServer,
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // stateless
-    enableJsonResponse: true, // plain JSON, no SSE
-  });
-  // The transport writes to the raw response; Fastify must not.
-  reply.hijack();
-  reply.raw.on("close", () => {
-    void transport.close();
-    void server.close();
-  });
-  try {
-    await server.connect(transport);
-    await transport.handleRequest(request.raw, reply.raw, request.body);
-  } catch (error) {
-    console.error("MCP request handling failed:", error);
-    if (!reply.raw.headersSent) {
-      reply.raw.writeHead(500, { "content-type": "application/json" });
-      reply.raw.end(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          error: { code: -32603, message: "Internal server error" },
-          id: null,
-        }),
-      );
-    }
-  }
+type Serve = (server: McpServer, request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/** The serving entry: protocol revision 2026-07-28 only, each request on
+ * its own, answered in plain JSON. The route builds the request's server
+ * before the entry runs, so a failure there answers like any other
+ * route's; the entry's factory hands that server over. */
+function mcpEntry(): Serve {
+  const current = new AsyncLocalStorage<McpServer>();
+  const onerror = (error: Error): void => console.warn(`MCP request not served: ${error.message}`);
+  const handle = toNodeHandler(
+    createMcpHandler(() => current.getStore()!, { legacy: "reject", responseMode: "json", onerror }),
+    { onerror },
+  );
+  return async (server, request, reply) => {
+    // The entry writes to the raw response; Fastify must not.
+    reply.hijack();
+    await current.run(server, () => handle(request.raw, reply.raw, request.body));
+  };
 }
 
 function callsTool(body: unknown): boolean {
@@ -109,9 +98,10 @@ async function bindingOf(ontologyKey: string, rulesetKey: string, body: unknown)
 export function mountMcp(app: FastifyInstance): void {
   // A tool with no row in the operation table fails the boot (`writeAccess.ts`).
   createRuntimeMcpServer("boot", "boot", { rulesetKey: "boot", writeAccess: "full" });
+  const handleMcpRequest = mcpEntry();
 
   app.route({
-    method: ["GET", "POST", "DELETE"],
+    method: "POST",
     url: "/mcp/ontologies/:ontologyKey/model",
     schema: { hide: true },
     handler: async (request, reply) => {
@@ -125,7 +115,7 @@ export function mountMcp(app: FastifyInstance): void {
   });
 
   app.route({
-    method: ["GET", "POST", "DELETE"],
+    method: "POST",
     url: "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey",
     schema: { hide: true },
     handler: async (request, reply) => {
@@ -143,7 +133,7 @@ export function mountMcp(app: FastifyInstance): void {
   });
 
   app.route({
-    method: ["GET", "POST", "DELETE"],
+    method: "POST",
     url: "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey",
     schema: { hide: true },
     handler: async (request, reply) => {

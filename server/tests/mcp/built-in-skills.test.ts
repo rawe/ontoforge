@@ -1,0 +1,76 @@
+/**
+ * The built-in skills (`mcp/builtInSkills.ts`): the modeling server serves
+ * them through the MCP skills extension — listed, fetched by URI and read
+ * back with the digest and size of their entry. A runtime server serves
+ * its lens's runtime skills instead (`runtime-skills.test.ts`).
+ */
+
+import { createHash } from "node:crypto";
+
+import type { Client } from "@modelcontextprotocol/client";
+import { SkillsClient } from "@modelcontextprotocol/client/ext/skills";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { connectServer } from "../mcpClient.js";
+import { builtInSkills } from "../../src/mcp/builtInSkills.js";
+import { createModelingMcpServer } from "../../src/mcp/modeling.js";
+
+const SKILL = "skill://property-or-relation/SKILL.md";
+
+let client: Client | undefined;
+
+afterEach(async () => {
+  await client?.close();
+  client = undefined;
+});
+
+describe("the modeling server", () => {
+  it("declares the skills extension and lists every built-in skill", async () => {
+    client = await connectServer("skills-tests", () => createModelingMcpServer("test_ont"));
+    const skills = new SkillsClient(client);
+    expect(skills.supported).toBe(true);
+    const { skills: listed } = await skills.list();
+    expect(listed).toEqual(builtInSkills.entries);
+    expect(listed.map((skill) => skill.frontmatter.name)).toContain("property-or-relation");
+  });
+
+  it("gets a skill by its SKILL.md URI and reads the file its entry describes", async () => {
+    client = await connectServer("skills-tests", () => createModelingMcpServer("test_ont"));
+    const skills = new SkillsClient(client);
+    const { skill } = await skills.get(SKILL);
+    expect(skill.uri).toBe(SKILL);
+    expect(skill.frontmatter.name).toBe("property-or-relation");
+
+    const file = await skills.read(skill);
+    expect(file.verified).toBe(true);
+    expect(file.body).toContain("## The property-or-relation checklist");
+    const resource = skill.resources.find((entry) => entry.uri === SKILL)!;
+    expect(file.bytes.byteLength).toBe(resource.size);
+    expect(`sha256:${createHash("sha256").update(file.bytes).digest("hex")}`).toBe(resource.digest);
+
+    // The plain resource read answers the same text.
+    const read = await client.readResource({ uri: SKILL });
+    expect(read.contents[0]).toMatchObject({ uri: SKILL, text: file.text });
+  });
+
+  it("serves every shipped skill: named after its directory, described, readable and within the client's file limit", async () => {
+    client = await connectServer("skills-tests", () => createModelingMcpServer("test_ont"));
+    const skills = new SkillsClient(client);
+    const { skills: listed } = await skills.list();
+    expect(listed.map((skill) => skill.frontmatter.name).sort()).toEqual(
+      ["lens-scoping", "property-or-relation", "schema-changes", "search-design"],
+    );
+    for (const entry of listed) {
+      const name = entry.frontmatter.name;
+      const uri = `skill://${name}/SKILL.md`;
+      expect(entry.uri, name).toBe(uri);
+      expect(entry.frontmatter.description, name).toBeTruthy();
+      const { skill } = await skills.get(uri);
+      const file = await skills.read(skill);
+      expect(file.verified, name).toBe(true);
+      expect(file.body, name).toMatch(/^# /m);
+      // Claude Code reads at most 100 KB of one text file.
+      expect(file.bytes.byteLength, name).toBeLessThan(100 * 1024);
+    }
+  });
+});

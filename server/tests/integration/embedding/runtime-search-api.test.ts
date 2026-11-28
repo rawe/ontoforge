@@ -8,11 +8,10 @@
  * modes. PostgreSQL only; SKIPPED when Ollama or the model is unavailable.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { connectServer } from "../../mcpClient.js";
 import { createApp } from "../../../src/app.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { createRuntimeMcpServer } from "../../../src/mcp/runtime.js";
@@ -40,10 +39,7 @@ describe.skipIf(!ollamaUp)("search through named indices (Ollama)", () => {
 
   /** `search`'s answer; the call must succeed. */
   async function search(args: object): Promise<Row> {
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await createRuntimeMcpServer(O, "all").connect(serverTransport);
-    const client = new Client({ name: "runtime-search-api-embedding", version: "0.0.1" });
-    await client.connect(clientTransport);
+    const client = await connectServer("runtime-search-api-embedding", () => createRuntimeMcpServer(O, "all"));
     try {
       const result = (await client.callTool({ name: "search", arguments: { ...args } })) as {
         content: { text: string }[];

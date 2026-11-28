@@ -13,11 +13,11 @@
  * hints over MCP.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
@@ -753,7 +753,7 @@ describe("document properties in results", () => {
 
 describe("MCP execute_query", () => {
   async function connectClient(url: string): Promise<Client> {
-    const client = new Client({ name: "oql-tests", version: "0.0.1" });
+    const client = mcpClient("oql-tests");
     await client.connect(new StreamableHTTPClientTransport(new URL(url)));
     return client;
   }

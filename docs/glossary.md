@@ -42,7 +42,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-search index, saved query, search profile, agent, retriever, navigator or ruleset. Keys are what every interface speaks.
+search index, saved query, search profile, runtime skill, agent, retriever, navigator or ruleset. Keys are what every interface speaks.
 They are never database identifiers, and they are never exposed as UUIDs. Every key is
 unique within its owner; only ontology keys are unique server-wide. A key follows the rule
 of its level:
@@ -55,6 +55,8 @@ of its level:
   `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
   arguments.
 - **Ruleset keys** match `^[a-z][a-z0-9_-]*$`.
+- **Runtime-skill keys** follow their own rule, because the key is the skill's name in
+  MCP clients: see [runtime skills](capabilities/runtime-skills.md#rules).
 
 ### Lenses
 
@@ -172,6 +174,12 @@ keeping after.
 **MCP client** — an AI client outside the server, connected to one of its MCP mounts and
 acting on its own judgment. Not an agent, which is an assistant the server runs.
 
+**Skill** — a guide an MCP mount publishes for MCP clients through the MCP skills
+extension: a `SKILL.md` with a name and a description, which a client reads when a task
+calls for it. A **built-in skill** ships with the server and is served on the modeling
+mount; a **runtime skill** is kept in a lens and served on that lens's runtime mounts.
+See [interfaces/mcp.md](interfaces/mcp.md#skills).
+
 ### Using the graph
 
 **OQL** — the OntoForge Query Language: a read-only, pattern-matching graph language
@@ -284,6 +292,10 @@ query without composing one.
 **Search profile** — a search tree stored under a key in a lens, `$query` marking where a
 caller's query text goes. See [capabilities/search-profiles.md](capabilities/search-profiles.md).
 
+**Runtime skill** — a guide kept under a key in a lens, with a description and Markdown
+content, that the lens's runtime MCP mounts publish as a skill. See
+[capabilities/runtime-skills.md](capabilities/runtime-skills.md).
+
 ### Assistants
 
 **Assistant** — something on a lens you ask questions and hold a conversation with. Every
@@ -364,7 +376,7 @@ database of its own beside the ontology database, used only with authentication 
 [architecture.md](architecture.md#components).
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, assistants, saved queries, search profiles, the
-keyword language set, custom search indices and managed-index switches only — no
-instance data and no ontology identity. See
+for export and import. Carries schema, lenses, assistants, saved queries, search profiles,
+runtime skills, the keyword language set, custom search indices and managed-index
+switches only — no instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, Layers, ListTree, Plug, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronLeft, Layers, ListTree, Plug, ScrollText, SquareTerminal, Trash2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
@@ -17,6 +17,7 @@ import { ConnectTab } from '@/components/studio/ConnectTab'
 import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
 import { SearchProfilesTab } from '@/components/studio/SearchProfilesTab'
 import { RetrieversTab } from '@/components/studio/RetrieversTab'
+import { RuntimeSkillsTab } from '@/components/studio/RuntimeSkillsTab'
 import { ScopeTab } from '@/components/studio/ScopeTab'
 import { SavedQueriesTab } from '@/components/studio/SavedQueriesTab'
 import { invalidateModeling, leaveAfterDelete, toastError } from '@/components/studio/lib'
@@ -38,10 +39,10 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['scope', 'agents', 'retriever-agents', 'navigators', 'queries', 'search-profiles', 'connect'] as const
+const TABS = ['scope', 'agents', 'retriever-agents', 'navigators', 'queries', 'search-profiles', 'skills', 'connect'] as const
 type Tab = (typeof TABS)[number]
 
-/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, navigators, saved queries, search profiles, connect. */
+/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, navigators, saved queries, search profiles, runtime skills, connect. */
 export function LensDetailPage() {
   const { ontologyKey, id } = useParams<{ ontologyKey: string; id: string }>()
   const navigate = useNavigate()
@@ -149,7 +150,7 @@ export function LensDetailPage() {
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
                     This deletes the lens, its scope, agents, retrievers, navigators, saved queries,
-                    search profiles and changesets, submitted ones included. The ontology's schema and instance data are not affected. This
+                    search profiles, runtime skills and changesets, submitted ones included. The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
@@ -203,6 +204,9 @@ export function LensDetailPage() {
             <TabsTrigger value="search-profiles">
               <ListTree className="size-3.5" /> Search profiles
             </TabsTrigger>
+            <TabsTrigger value="skills">
+              <ScrollText className="size-3.5" /> Skills
+            </TabsTrigger>
             <TabsTrigger value="connect">
               <Plug className="size-3.5" /> Connect
             </TabsTrigger>
@@ -224,6 +228,9 @@ export function LensDetailPage() {
           </TabsContent>
           <TabsContent value="search-profiles">
             <SearchProfilesTab ontologyKey={ontologyKey} lens={lens} />
+          </TabsContent>
+          <TabsContent value="skills">
+            <RuntimeSkillsTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="connect">
             <ConnectTab ontologyKey={ontologyKey} lens={lens} />

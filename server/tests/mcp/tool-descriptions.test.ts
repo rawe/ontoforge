@@ -5,12 +5,11 @@
  * rules themselves — the one text `filterRules` builds.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { connectServer } from "../mcpClient.js";
 import type { ModelingStore, RuntimeStore, WriteAccess } from "../../src/core/ports.js";
 import { RelationGroup, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { createModelingMcpServer } from "../../src/mcp/modeling.js";
@@ -29,11 +28,8 @@ interface ListedTool {
   inputSchema: { properties?: Record<string, unknown> };
 }
 
-async function listTools(server: McpServer): Promise<ListedTool[]> {
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  const client = new Client({ name: "tool-description-tests", version: "0.0.1" });
-  await client.connect(clientTransport);
+async function listTools(build: () => McpServer): Promise<ListedTool[]> {
+  const client = await connectServer("tool-description-tests", build);
   const { tools } = await client.listTools();
   await client.close();
   return tools;
@@ -42,11 +38,11 @@ async function listTools(server: McpServer): Promise<ListedTool[]> {
 const descriptions = (tools: ListedTool[]) =>
   new Map(tools.map((tool) => [tool.name, tool.description ?? ""]));
 
-const modelingTools = await listTools(createModelingMcpServer("onto"));
-const runtimeTools = await listTools(createRuntimeMcpServer("onto", "all"));
+const modelingTools = await listTools(() => createModelingMcpServer("onto"));
+const runtimeTools = await listTools(() => createRuntimeMcpServer("onto", "all"));
 const runtime = descriptions(runtimeTools);
 const rulesetTools = (rulesetKey: string, writeAccess: WriteAccess) =>
-  listTools(createRuntimeMcpServer("onto", "all", { rulesetKey, writeAccess }));
+  listTools(() => createRuntimeMcpServer("onto", "all", { rulesetKey, writeAccess }));
 const full = descriptions(await rulesetTools("agent-a", "full"));
 const proposeTools = await rulesetTools("agent-s", "propose");
 const propose = descriptions(proposeTools);

@@ -22,11 +22,11 @@
 
 import { readFileSync } from "node:fs";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
@@ -428,7 +428,7 @@ describe("the parent end", () => {
 describe("modeling MCP transfer pair", () => {
   // The mount is bound to the ontology its URL names (test_ont here).
   async function connect(): Promise<Client> {
-    const client = new Client({ name: "session-10-tests", version: "0.0.1" });
+    const client = mcpClient("session-10-tests");
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/test_ont/model`)));
     return client;
   }
@@ -442,7 +442,7 @@ describe("modeling MCP transfer pair", () => {
     return JSON.parse(result.content[0]!.text) as Row;
   }
 
-  it("get_schema and export_schema both return exactly the REST export payload", async () => {
+  it("export_schema returns exactly the REST export payload, get_schema the same without runtime skills", async () => {
     await importInto("test_ont", EXPORT_FIXTURE);
     const rest = await exportFrom("test_ont");
 
@@ -450,8 +450,9 @@ describe("modeling MCP transfer pair", () => {
     try {
       const viaGetSchema = await callJson(client, "get_schema");
       const viaExport = await callJson(client, "export_schema");
-      expect(viaGetSchema).toEqual(rest);
       expect(viaExport).toEqual(rest);
+      const lenses = (rest.lenses as Row[]).map(({ skills: _skills, ...lens }) => lens);
+      expect(viaGetSchema).toEqual({ ...rest, lenses });
     } finally {
       await client.close();
     }

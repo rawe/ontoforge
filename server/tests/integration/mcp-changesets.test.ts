@@ -13,11 +13,11 @@
  * changeset.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../mcpClient.js";
 import { createApp } from "../../src/app.js";
 import { settings } from "../../src/config.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
@@ -71,7 +71,7 @@ const clients: Client[] = [];
 
 async function connect(rulesetKey: string | null = null): Promise<Client> {
   const path = `/mcp/ontologies/${O}/runtime/lenses/all${rulesetKey === null ? "" : `/rulesets/${rulesetKey}`}`;
-  const client = new Client({ name: "mcp-changesets-tests", version: "0.0.1" });
+  const client = mcpClient("mcp-changesets-tests");
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`)));
   clients.push(client);
   return client;

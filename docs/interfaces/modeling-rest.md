@@ -9,6 +9,7 @@ Find routes for [lenses](#lenses), [entity types](#entity-types),
 [relation types](#relation-types), [properties](#property-definitions),
 [scope inclusions](#scope-inclusions), [assistants](#agent-configurations),
 [saved queries](#saved-queries), [search profiles](#search-profiles),
+[runtime skills](#runtime-skills),
 [search indices](#search-indices), [schema proposals](#schema-proposals), or
 [schema-wide operations](#schema-wide-operations).
 
@@ -139,6 +140,20 @@ Per-lens, addressed by lens key. Semantics:
 A tree of the wrong shape is refused as a request of the wrong shape, each path named; a
 tree breaking a rule is refused with one validation error listing each violation as
 `<path>: <message>`.
+
+## Runtime skills
+
+Per-lens, addressed by lens key. Semantics:
+[capabilities/runtime-skills.md](../capabilities/runtime-skills.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/lenses/{lensKey}/skills` | List the lens's runtime skills, each with its content |
+| GET | `/lenses/{lensKey}/skills/{skillKey}` | Read one runtime skill |
+| PUT | `/lenses/{lensKey}/skills/{skillKey}` | Create or replace one from `description` and `content`; answers 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/skills/{skillKey}` | Delete a runtime skill |
+
+A skill breaking a rule is refused with one validation error listing each violation.
 
 ## Retrievers
 
@@ -284,7 +299,7 @@ touch search indices. After an embedding-provider switch it is run once per onto
 [capabilities/search.md](../capabilities/search.md#rebuild).
 
 Transfer carries the design only — schema, lenses, agents, saved queries, search profiles,
-retrievers, navigators, search indices; no instance
+runtime skills, retrievers, navigators, search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](../capabilities/transfer.md) and
 [capabilities/search.md](../capabilities/search.md).

@@ -411,11 +411,8 @@ async function serviceStep() {
 async function mcpStep() {
   need(ctx.ontologyCreated && ctx.grants.reader, 'needs the e2e ontology and the reader grant');
   const mount = mountUrl(ctx.lensA);
-  const initialize = {
-    jsonrpc: '2.0', id: 1, method: 'initialize',
-    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } },
-  };
-  const post = (token) => call(mount, 'POST', '', { body: initialize, token, headers: { accept: 'application/json, text/event-stream' } });
+  const listing = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} };
+  const post = (token) => call(mount, 'POST', '', { body: listing, token, headers: { accept: 'application/json, text/event-stream' } });
   const anonymous = await post();
   const header = anonymous.headers.get('www-authenticate') ?? '';
   const metadataUrl = /resource_metadata="([^"]+)"/.exec(header)?.[1];
@@ -453,7 +450,7 @@ async function mcpStep() {
     const mountToken = mcp.tokens().access_token;
     const onRest = await call(BASE, 'GET', '/api/ontologies', { token: mountToken });
     const restOnMount = await post(ctx.tokens.reader);
-    const otherLens = await call(mountUrl(ctx.lensB), 'POST', '', { body: initialize, token: mountToken, headers: { accept: 'application/json, text/event-stream' } });
+    const otherLens = await call(mountUrl(ctx.lensB), 'POST', '', { body: listing, token: mountToken, headers: { accept: 'application/json, text/event-stream' } });
     check('a token works on its resource only: mount token on REST, REST token on the mount, mount token on another mount → 401',
       onRest.status === 401 && restOnMount.status === 401 && otherLens.status === 401,
       `REST ${said(onRest)}, mount ${said(restOnMount)}, lens B mount ${said(otherLens)}`);

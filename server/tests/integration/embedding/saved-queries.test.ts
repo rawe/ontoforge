@@ -7,9 +7,11 @@
  * SKIPPED when Ollama or the model is unavailable.
  */
 
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mcpClient } from "../../mcpClient.js";
 import { createApp } from "../../../src/app.js";
 import { getEmbeddingProvider } from "../../../src/core/embedding.js";
 import {
@@ -244,11 +246,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     if (address === null || typeof address === "string") {
       throw new Error("Expected a bound TCP port");
     }
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { StreamableHTTPClientTransport } = await import(
-      "@modelcontextprotocol/sdk/client/streamableHttp.js"
-    );
-    const client = new Client({ name: "saved-queries-embedding-tests", version: "0.0.1" });
+    const client = mcpClient("saved-queries-embedding-tests");
     await client.connect(
       new StreamableHTTPClientTransport(
         new URL(`http://127.0.0.1:${address.port}/mcp/ontologies/test_ont/runtime/lenses/sq_test`),

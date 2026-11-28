@@ -12,13 +12,13 @@
  * `narrow`, which lists item's `name` and `code` only.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { randomUUID } from "node:crypto";
 
+import { mcpClient } from "../mcpClient.js";
 import { runQuery, withTransaction } from "../../src/adapters/postgres/errors.js";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
@@ -376,7 +376,7 @@ describe("writes and addressing by identity", () => {
   });
 
   it("addresses by identity over MCP", async () => {
-    const client = new Client({ name: "identity-tests", version: "0.0.1" });
+    const client = mcpClient("identity-tests");
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/all`)));
     try {
       const tool = async (name: string, args: Row) =>

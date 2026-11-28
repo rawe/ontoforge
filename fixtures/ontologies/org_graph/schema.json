@@ -1,5 +1,5 @@
 {
-  "formatVersion": "7.0",
+  "formatVersion": "8.0",
   "keywordLanguages": [
     "english"
   ],
@@ -248,6 +248,7 @@
       "description": "The person has the skill.",
       "fromEntityTypeKey": "person",
       "toEntityTypeKey": "skill",
+      "parent": null,
       "properties": [
         {
           "key": "proficiency",
@@ -265,6 +266,7 @@
       "description": "The source person is the direct line manager of the target person.",
       "fromEntityTypeKey": "person",
       "toEntityTypeKey": "person",
+      "parent": null,
       "properties": [
         {
           "key": "since",
@@ -282,6 +284,7 @@
       "description": "The person belongs to the team, with a role and a share of working time.",
       "fromEntityTypeKey": "person",
       "toEntityTypeKey": "team",
+      "parent": null,
       "properties": [
         {
           "key": "allocation",
@@ -307,6 +310,7 @@
       "description": "The team responsible for the project.",
       "fromEntityTypeKey": "project",
       "toEntityTypeKey": "team",
+      "parent": null,
       "properties": []
     },
     {
@@ -315,6 +319,7 @@
       "description": "The project needs people with the skill.",
       "fromEntityTypeKey": "project",
       "toEntityTypeKey": "skill",
+      "parent": null,
       "properties": []
     },
     {
@@ -323,6 +328,7 @@
       "description": "The source policy version replaces the target policy version, which is the version immediately before it.",
       "fromEntityTypeKey": "policy_document",
       "toEntityTypeKey": "policy_document",
+      "parent": null,
       "properties": []
     },
     {
@@ -331,6 +337,7 @@
       "description": "The person is staffed on the project.",
       "fromEntityTypeKey": "person",
       "toEntityTypeKey": "project",
+      "parent": null,
       "properties": [
         {
           "key": "hours_per_week",
@@ -364,7 +371,8 @@
             ]
           }
         ],
-        "retrievers": []
+        "retrievers": [],
+        "navigators": []
       },
       "savedQueries": [
         {
@@ -376,8 +384,12 @@
               "name": "main",
               "type": "oql",
               "oql": "MATCH (p:person)-[:member_of]->(t:team) RETURN t.name AS team, avg(p.salary) AS average_salary, count(p) AS members ORDER BY team",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": null
             }
@@ -393,8 +405,12 @@
               "name": "main",
               "type": "oql",
               "oql": "MATCH (m:person)-[:manages]->(r:person) RETURN m.name AS manager, count(r) AS direct_reports ORDER BY direct_reports DESC, manager",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": null
             }
@@ -410,8 +426,12 @@
               "name": "main",
               "type": "oql",
               "oql": "MATCH (p:person) WHERE p.hired_at > $since RETURN p.name AS person, p.hired_at AS hired_at, p.level AS level ORDER BY hired_at DESC",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": null
             }
@@ -433,8 +453,12 @@
               "name": "main",
               "type": "oql",
               "oql": "MATCH (p:person) OPTIONAL MATCH (p)-[w:works_on]->(j:project) RETURN p.name AS person, p.employee_number AS employee_number, j.name AS project, w.hours_per_week AS hours ORDER BY person, employee_number, project",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": null
             }
@@ -450,8 +474,12 @@
               "name": "main",
               "type": "oql",
               "oql": "MATCH (p:project) WHERE p.priority >= $min_priority RETURN p.name AS project, p.code AS code, p.priority AS priority, p.status AS status ORDER BY priority DESC, project",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": null
             }
@@ -473,8 +501,14 @@
               "name": "skills",
               "type": "search",
               "oql": null,
-              "entityTypeKey": "skill",
               "query": "$q",
+              "types": [
+                "skill"
+              ],
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": 3,
               "bindings": null
             },
@@ -482,8 +516,12 @@
               "name": "holders",
               "type": "oql",
               "oql": "MATCH (p:person)-[h:has_skill]->(s:skill) WHERE s._id IN $skill_ids RETURN p._id AS person_id, p.name AS person, s.name AS skill, h.proficiency AS proficiency ORDER BY person",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": {
                 "skill_ids": "{{skills._id}}"
@@ -493,8 +531,12 @@
               "name": "teams",
               "type": "oql",
               "oql": "MATCH (p:person)-[:member_of]->(t:team) WHERE p._id IN $person_ids RETURN t.name AS team, count(p) AS holders, collect(p.name) AS people ORDER BY holders DESC, team",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": {
                 "person_ids": "{{holders.person_id}}"
@@ -518,8 +560,12 @@
               "name": "main",
               "type": "oql",
               "oql": "MATCH (t:team)<-[:owned_by]-(p:project)-[:requires_skill]->(s:skill) WHERE t.name = $team RETURN s.name AS skill, collect(p.name) AS projects ORDER BY skill",
-              "entityTypeKey": null,
               "query": null,
+              "types": null,
+              "indices": null,
+              "keyword": null,
+              "semantic": null,
+              "filter": null,
               "limit": null,
               "bindings": null
             }
@@ -532,7 +578,9 @@
             }
           ]
         }
-      ]
+      ],
+      "searchProfiles": [],
+      "skills": []
     },
     {
       "key": "directory",
@@ -564,9 +612,12 @@
       ],
       "assistants": {
         "agents": [],
-        "retrievers": []
+        "retrievers": [],
+        "navigators": []
       },
-      "savedQueries": []
+      "savedQueries": [],
+      "searchProfiles": [],
+      "skills": []
     },
     {
       "key": "management",
@@ -602,9 +653,12 @@
       ],
       "assistants": {
         "agents": [],
-        "retrievers": []
+        "retrievers": [],
+        "navigators": []
       },
-      "savedQueries": []
+      "savedQueries": [],
+      "searchProfiles": [],
+      "skills": []
     },
     {
       "key": "staffing",
@@ -637,9 +691,18 @@
       ],
       "assistants": {
         "agents": [],
-        "retrievers": []
+        "retrievers": [],
+        "navigators": []
       },
-      "savedQueries": []
+      "savedQueries": [],
+      "searchProfiles": [],
+      "skills": [
+        {
+          "key": "staffing-gap-review",
+          "description": "Corvane staffing gap review: which active projects lack a qualified member for a skill they require, reported in a fixed table. Use when asked whether projects are staffed, which skills a project is missing, or for a staffing or skills gap review.",
+          "content": "# Corvane staffing gap review\n\nChecks whether every active project of Corvane Engineering has, for each skill it\nrequires, at least one project member who can actually carry that skill, and answers in a\nfixed report. The review only reads; it never changes data.\n\n## The 4/10 rule\n\nA required skill is covered on a project only by a person who meets all three:\n\n1. works on that project (`works_on`) for at least 10 hours per week (`hours_per_week`;\n   a missing value counts as 0);\n2. holds the skill (`has_skill`) with `proficiency` 4 or higher (1–5; a missing\n   proficiency counts as not rated and never covers);\n3. has `status` `active` (not `on_leave`, not `left`).\n\nSomeone who holds the skill but does not work on the project never covers it. Career\ngrade (`person.level`) and skill level (`skill.level`) play no part.\n\n## Scope\n\nReview only projects with `status` `active`. List `planned`, `on_hold` and `completed`\nprojects under \"Not reviewed\" with their status; never report their skills as gaps, even\nwhen nobody works on them.\n\n## Steps\n\nUse the runtime tool `execute_query` (read-only OQL). Two queries are enough; do not page\nthrough `list_entities` or walk `get_neighbors` entity by entity.\n\n1. Every project with its required skills:\n\n   ```\n   MATCH (j:project) OPTIONAL MATCH (j)-[:requires_skill]->(s:skill)\n   RETURN j.code AS code, j.name AS project, j.status AS status, s.name AS skill\n   ORDER BY code, skill\n   ```\n\n2. Members of active projects who hold one of the project's required skills:\n\n   ```\n   MATCH (p:person)-[w:works_on]->(j:project)-[:requires_skill]->(s:skill), (p)-[h:has_skill]->(s)\n   WHERE j.status = 'active'\n   RETURN j.code AS code, s.name AS skill, p.name AS person, p.status AS person_status,\n          w.hours_per_week AS hours, h.proficiency AS proficiency\n   ORDER BY code, skill, person\n   ```\n\n3. For each active project and required skill, apply the 4/10 rule to the rows of step 2.\n   No qualifying row means a gap; no row at all is a gap too.\n4. For each gap, name the nearest candidate: the member from step 2 with the highest\n   proficiency for that skill, and the condition they fail (\"proficiency 3\", \"4 h/week\",\n   \"not rated\"). With no member holding the skill, write \"nobody on the project\".\n\nTwo different people are named Chen Wei. When one of them appears in a result, add\n`p.employee_number` to the query and name them with it.\n\n## Report\n\nAnswer with exactly this format, nothing before the heading:\n\n```\nStaffing gap review — rule 4/10\n| Project | Verdict | Uncovered skills | Nearest candidate |\n|---|---|---|---|\n| PRJ-AAA Project name | COVERED | — | — |\n| PRJ-BBB Project name | GAP | Skill name | Person name (proficiency 3, 12 h/week) |\n\nNot reviewed: PRJ-CCC (planned), PRJ-DDD (on_hold)\n\nResult: <projects with a gap> of <active projects> active projects have a gap.\n```\n\nOne row per active project, sorted by code. A project with several gaps lists them in\none row, separated by \"; \". Keep the blank lines, so the two closing lines stay outside\nthe table. Add at most two sentences after the report, and only about\nwhat the data leaves open (for example a membership without hours).\n"
+        }
+      ]
     }
   ]
 }

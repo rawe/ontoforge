@@ -7,10 +7,10 @@
  * required, and its direct writes and commits are refused alike.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { connectServer } from "../mcpClient.js";
 import type { WriteAccess } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { TOOLS, type Binding } from "../../src/runtime/writeAccess.js";
@@ -32,11 +32,7 @@ const { createRuntimeMcpServer } = await import("../../src/mcp/runtime.js");
 const ID = "11111111-1111-4111-8111-111111111111";
 
 async function connect(role: WriteAccess, binding?: Binding, listedRole: WriteAccess = role): Promise<Client> {
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await createRuntimeMcpServer("test_ont", "all", binding, role, listedRole).connect(serverTransport);
-  const client = new Client({ name: "role-level-tests", version: "0.0.1" });
-  await client.connect(clientTransport);
-  return client;
+  return connectServer("role-level-tests", () => createRuntimeMcpServer("test_ont", "all", binding, role, listedRole));
 }
 
 async function tools(role: WriteAccess, binding?: Binding) {

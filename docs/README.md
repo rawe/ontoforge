@@ -54,6 +54,7 @@ capability remains the home for what the feature means.
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [search-profiles](capabilities/search-profiles.md) | Search trees stored per lens, run by key with a query |
+| [runtime-skills](capabilities/runtime-skills.md) | Guides stored per lens that its runtime MCP mounts publish as skills |
 | [agents](capabilities/agents.md) | Agents — assistants that answer by working with read-only tools: configuration, tool rules, live tool activity, the default agent |
 | [navigators](capabilities/navigators.md) | Navigators — assistants that answer by walking the lens's graph: configuration, the pipeline of a turn, what the client sees, the default navigator |
 | [retrievers](capabilities/retrievers.md) | Retrievers — assistants that answer from a lens's search indices: configuration, validation, planning, retrieval, retrieve, diagnostics, the default retriever, portable JSON |

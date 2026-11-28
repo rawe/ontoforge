@@ -27,6 +27,14 @@ export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
 /** Key rule of rulesets. Mirrors the server's `RULESET_KEY_PATTERN`. */
 export const RULESET_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
 
+/**
+ * Key rule of runtime skills: the Agent Skill name rule, because the key is
+ * the skill's name in MCP clients — lowercase letters, digits and single
+ * hyphens, no hyphen at either end, no underscore. Mirrors the server's
+ * `RUNTIME_SKILL_KEY_PATTERN`.
+ */
+export const RUNTIME_SKILL_KEY_PATTERN = /^[\da-z]+(?:-[\da-z]+)*$/
+
 /** Mirrors the server's `MAX_KEY_LENGTH`. */
 export const MAX_KEY_LENGTH = 64
 

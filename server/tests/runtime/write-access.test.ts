@@ -7,12 +7,12 @@
  * not-found order and before any service runs, reading the ruleset once.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/client";
 import Fastify, { type FastifyInstance } from "fastify";
 import { serializerCompiler, validatorCompiler } from "fastify-type-provider-zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { connectServer } from "../mcpClient.js";
 import { ConflictError } from "../../src/core/exceptions.js";
 import type { WriteAccess } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
@@ -186,12 +186,8 @@ describe("the tables cannot drift", () => {
 
 /** A client of a server whose tool list was built at `listed`. */
 async function connect(rulesetKey: string | null, listed: WriteAccess = "full"): Promise<Client> {
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const binding = rulesetKey === null ? undefined : { rulesetKey, writeAccess: listed };
-  await createRuntimeMcpServer("test_ont", "all", binding).connect(serverTransport);
-  const client = new Client({ name: "write-access-tests", version: "0.0.1" });
-  await client.connect(clientTransport);
-  return client;
+  return connectServer("write-access-tests", () => createRuntimeMcpServer("test_ont", "all", binding));
 }
 
 let level: WriteAccess;

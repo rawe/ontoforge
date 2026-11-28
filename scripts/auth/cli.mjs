@@ -124,31 +124,34 @@ export async function refresh({ resource, refreshToken, clientId = 'ontoforge-cl
   return postForm(metadata.token_endpoint, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, resource });
 }
 
-/** The tools of an MCP mount: initialize, then tools/list (Streamable HTTP, JSON-RPC). */
+/** The tools of an MCP mount: one tools/list request at protocol revision 2026-07-28 (JSON-RPC over HTTP). */
 export async function listTools(mount, accessToken) {
-  let id = 0;
-  const rpc = async (method, params, notification = false) => {
-    const response = await fetch(mount, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        'mcp-protocol-version': '2025-06-18',
+  const response = await fetch(mount, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-protocol-version': '2026-07-28',
+      'mcp-method': 'tools/list',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientInfo': { name: 'ontoforge-cli', version: '1.0.0' },
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
       },
-      body: JSON.stringify({ jsonrpc: '2.0', method, params, ...(notification ? {} : { id: ++id }) }),
-    });
-    if (!response.ok) throw new Error(`${method} answered ${response.status}`);
-    if (notification) return null;
-    // A server may answer as an event stream: the message is its `data:` line.
-    const text = await response.text();
-    const body = JSON.parse(response.headers.get('content-type')?.includes('text/event-stream') ? /^data: (.*)$/m.exec(text)[1] : text);
-    if (body.error) throw new Error(`${method}: ${body.error.message}`);
-    return body.result;
-  };
-  await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'ontoforge-cli', version: '1.0.0' } });
-  await rpc('notifications/initialized', {}, true);
-  return (await rpc('tools/list', {})).tools;
+    }),
+  });
+  if (!response.ok) throw new Error(`tools/list answered ${response.status}`);
+  const body = await response.json();
+  if (body.error) throw new Error(`tools/list: ${body.error.message}`);
+  return body.result.tools;
 }
 
 async function main() {
